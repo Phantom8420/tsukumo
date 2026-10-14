@@ -158,7 +158,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* -- kotsu cards ----------------------------------------------------------------- */
 
 .kcard {
-  border: 1px solid var(--line); border-left: 3px solid var(--gold); border-radius: var(--radius);
+  border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--panel-2); padding: 14px 16px; display: grid; gap: 8px;
 }
 .kcard .k-title { font-family: var(--display); font-size: 18px; }
