@@ -3,7 +3,7 @@
 import { info } from "./api.js";
 
 const NAV = [
-  ["index.html", "Workshop", "工房"],
+  ["dashboard.html", "Workshop", "工房"],
   ["live.html", "Record & train", "記録・稽古"],
   ["radar.html", "Succession", "継承"],
 ];
@@ -14,7 +14,7 @@ export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 export const $ = (sel, root = document) => root.querySelector(sel);
 
 export function header() {
-  const here = location.pathname.split("/").pop() || "index.html";
+  const here = location.pathname.split("/").pop() || "dashboard.html";
   const bar = document.createElement("header");
   bar.className = "topbar";
   bar.innerHTML = `
@@ -22,12 +22,37 @@ export function header() {
     <nav>${NAV.map(([href, en, ja]) =>
       `<a href="${href}" class="${here === href ? "active" : ""}">${en}<span class="ja">${ja}</span></a>`).join("")}</nav>
     <div class="spacer"></div>
-    <span class="pill" id="ai-pill">AI …</span>`;
+    <span class="pill" id="ai-pill">AI …</span>
+    ${themeSwitch()}`;
   document.body.prepend(bar);
+  wireThemeSwitches();
   info().then((i) => {
     const pill = $("#ai-pill");
     pill.textContent = i.ai === "claude" ? "Claude connected" : "AI offline: rule-based cards";
     pill.className = `pill ${i.ai === "claude" ? "ok" : "warn"}`;
+  });
+}
+
+// Theme: "dark" (sumi) is the default; the choice is remembered per browser.
+export const theme = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
+
+export function setTheme(t) {
+  if (t === "light") document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("tsukumo-theme", t); } catch {}
+  document.querySelectorAll(".switch[data-theme-switch]").forEach((b) => {
+    b.setAttribute("aria-checked", String(t === "light"));
+  });
+  window.dispatchEvent(new Event("resize"));  // canvases read colours from CSS at draw time
+}
+
+export const themeSwitch = () =>
+  `<button class="switch" role="switch" data-theme-switch aria-checked="${theme() === "light"}" aria-label="Light theme"><i></i></button>`;
+
+export function wireThemeSwitches(root = document) {
+  root.querySelectorAll(".switch[data-theme-switch]:not([data-wired])").forEach((b) => {
+    b.dataset.wired = "1";
+    b.addEventListener("click", () => setTheme(theme() === "light" ? "dark" : "light"));
   });
 }
 

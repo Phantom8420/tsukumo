@@ -22,6 +22,7 @@ export class Lanes {
     this.opts = { t0: 0, t1: 30, series: {}, ghost: {}, bands: [], cursor: null };
     this.ranges = Object.fromEntries(Object.entries(RANGE).map(([k, v]) => [k, [...v]]));
     new ResizeObserver(() => this.draw()).observe(canvas.parentElement);
+    window.addEventListener("resize", () => this.draw());  // also fired on theme change
     canvas.addEventListener("click", (e) => this._click(e));
     canvas.style.cursor = onBand || onTime ? "pointer" : "default";
   }
@@ -86,7 +87,7 @@ export class Lanes {
     for (const b of bands) {
       const x0 = Math.max(GUTTER, this._x(b.t0, w)), x1 = Math.min(w - 8, this._x(b.t1, w));
       if (x1 < GUTTER || x0 > w) continue;
-      ctx.fillStyle = b.color || "rgba(214,165,72,0.12)";
+      ctx.fillStyle = b.color || "rgba(143,166,224,0.14)";
       ctx.fillRect(x0, 0, Math.max(x1 - x0, 2), plotH);
       if (b.selected) {
         ctx.strokeStyle = accent;

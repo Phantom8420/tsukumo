@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TSUKUMO · Review</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500&family=Shippori+Mincho:wght@500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500&family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
+  <script>try{if(localStorage.getItem("tsukumo-theme")==="light")document.documentElement.dataset.theme="light"}catch(e){}</script>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -26,7 +27,7 @@
       </div>
       <canvas class="lanes" id="m-chart"></canvas>
       <div class="legend"><span><i style="background:var(--accent)"></i>master</span>
-        <span><i style="background:rgba(214,165,72,.5)"></i>open question</span>
+        <span><i style="background:rgba(143,166,224,.5)"></i>open question</span>
         <span><i style="background:rgba(114,176,127,.5)"></i>answered</span></div>
     </div>
     <div class="grid" style="align-content:start">
@@ -119,7 +120,7 @@
           id: x.id, t0: x.t_start, t1: Math.max(x.t_end, x.t_start + 0.6), label: `Q${i + 1}`,
           selected: x.id === selected,
           color: x.status === "answered" ? "rgba(114,176,127,0.16)"
-            : x.status === "dismissed" ? "rgba(107,100,92,0.12)" : "rgba(214,165,72,0.18)",
+            : x.status === "dismissed" ? "rgba(107,100,92,0.12)" : "rgba(143,166,224,0.2)",
         })),
       });
       $("#surprises").innerHTML = detail.surprises.length ? detail.surprises.map((x, i) => `
