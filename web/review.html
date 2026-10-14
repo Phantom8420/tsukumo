@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSUKUMO · Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500&family=Shippori+Mincho:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<main>
+  <div class="page-head">
+    <div>
+      <h1 id="title">Session</h1>
+      <p id="subtitle"></p>
+    </div>
+    <div class="row" id="head-actions"></div>
+  </div>
+
+  <!-- master: surprise review -->
+  <section class="grid side hidden" id="master-view">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Where the master surprised the model <span class="ja">想定外の瞬間</span></h2>
+      </div>
+      <canvas class="lanes" id="m-chart"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>master</span>
+        <span><i style="background:rgba(214,165,72,.5)"></i>open question</span>
+        <span><i style="background:rgba(114,176,127,.5)"></i>answered</span></div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="panel">
+        <h3 style="margin-bottom:10px">Questions for the master <span class="ja">質問</span></h3>
+        <div class="grid" id="surprises" style="gap:8px"></div>
+      </div>
+      <div class="panel hidden" id="detail"></div>
+    </div>
+  </section>
+
+  <!-- apprentice: score report -->
+  <section class="grid side hidden" id="app-view">
+    <div class="panel">
+      <div class="panel-head"><h2>Against the master's ghost <span class="ja">師匠の影</span></h2></div>
+      <canvas class="lanes" id="a-chart"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>apprentice</span>
+        <span><i style="background:var(--ghost)"></i>master (aligned)</span>
+        <span><i style="background:rgba(226,73,47,.35)"></i>weak spot</span></div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="panel">
+        <div class="muted">Match to master</div>
+        <div class="big-score" id="score">–</div>
+        <div class="grid" id="channels" style="margin-top:16px;gap:10px"></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:10px">Work on <span class="ja">課題</span></h3>
+        <div class="grid" id="weak" style="gap:8px"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+  import { api, info } from "./js/api.js";
+  import { Lanes, series, clock } from "./js/chart.js";
+  import { header, esc, $, ago, cardHTML, wireCardLangs, toast, scoreClass } from "./js/ui.js";
+
+  header();
+  const id = new URLSearchParams(location.search).get("s");
+  const meta = await info();
+  const SPEECH = { ja: "ja-JP", en: "en-US", vi: "vi-VN", id: "id-ID" };
+  const EXAMPLE = "最後は刃をほんの少し起こして、力を抜いて、ゆっくり数回だけ。小刃を付けると刃先が丈夫になって長持ちする。";
+
+  let detail = await api.get(`/api/sessions/${id}`).catch((e) => { $("#title").textContent = e.message; throw e; });
+  const s = detail.session;
+  $("#title").innerHTML = `${esc(s.person_name)} <span class="ja">${esc(s.skill_name)}</span>`;
+  $("#subtitle").textContent =
+    `${s.role === "master" ? "Master session" : "Apprentice session"} · ${ago(s.created_at)} · ` +
+    `${Math.round(s.duration ?? 0)}s · ${s.strokes ?? 0} strokes`;
+
+  if (s.role === "master") masterView(); else apprenticeView();
+
+  // -- master ---------------------------------------------------------------------
+
+  function masterView() {
+    $("#master-view").classList.remove("hidden");
+    let selected = null;
+    const chart = new Lanes($("#m-chart"), {
+      channels: meta.channel_order, meta: meta.channels, laneHeight: 62,
+      extra: { key: "surprise", label: "Surprise" },
+      onBand: (sid) => select(sid),
+    });
+
+    const refresh = async () => {
+      detail = await api.get(`/api/sessions/${id}`);
+      render();
+    };
+
+    const actions = () => {
+      $("#head-actions").innerHTML = detail.is_reference
+        ? `<span class="pill ok">Reference ghost for this skill</span>`
+        : `<button class="btn" id="make-ref">Use as reference ghost</button>`;
+      $("#make-ref")?.addEventListener("click", async () => {
+        await api.post(`/api/skills/${s.skill_id}/reference`, { session_id: id });
+        toast("Apprentices will now train against this session.");
+        refresh();
+      });
+    };
+
+    function render() {
+      actions();
+      const f = detail.features;
+      const all = Object.fromEntries(meta.channel_order.map((c) => [c, series(f, c)]));
+      all.surprise = { t: f.t, v: detail.surprise_score };
+      chart.set({
+        t0: 0, t1: f.t.at(-1), series: all,
+        bands: detail.surprises.map((x, i) => ({
+          id: x.id, t0: x.t_start, t1: Math.max(x.t_end, x.t_start + 0.6), label: `Q${i + 1}`,
+          selected: x.id === selected,
+          color: x.status === "answered" ? "rgba(114,176,127,0.16)"
+            : x.status === "dismissed" ? "rgba(107,100,92,0.12)" : "rgba(214,165,72,0.18)",
+        })),
+      });
+      $("#surprises").innerHTML = detail.surprises.length ? detail.surprises.map((x, i) => `
+        <div class="surprise ${x.id === selected ? "selected" : ""} ${x.status}" data-id="${x.id}">
+          <div class="s-top"><b>Q${i + 1} · ${clock(x.t_start)} · stroke ${x.stroke_index}</b>
+            <span class="pill ${x.status === "answered" ? "ok" : x.status === "open" ? "warn" : ""}">${x.status}</span></div>
+          <div class="s-sum">${esc(x.summary)}</div>
+        </div>`).join("") : `<div class="empty">Steady session: nothing surprising to ask about.</div>`;
+      if (selected) renderDetail();
+    }
+
+    $("#surprises").addEventListener("click", (e) => {
+      const el = e.target.closest(".surprise");
+      if (el) select(el.dataset.id);
+    });
+
+    function select(sid) {
+      selected = sid;
+      render();
+    }
+
+    function renderDetail() {
+      const x = detail.surprises.find((y) => y.id === selected);
+      const card = detail.cards.find((c) => c.surprise_id === selected);
+      const n = detail.surprises.indexOf(x) + 1;
+      const box = $("#detail");
+      box.classList.remove("hidden");
+      const ev = x.evidence.map((e) => `<tr><td>${e.trend ? "build-up: " : ""}${esc(meta.channels[e.channel].label)}</td>
+        <td class="num mono">${e.before.toFixed(1)} → ${e.during.toFixed(1)} ${esc(e.unit)}</td></tr>`).join("");
+      box.innerHTML = `
+        <h3>Q${n}: Why did you do that here? <span class="ja">なぜここで？</span></h3>
+        <p class="muted" style="margin:6px 0 10px">${esc(x.summary)}.</p>
+        <table style="margin-bottom:14px">${ev}</table>
+        ${card ? `<div id="card-slot">${cardHTML(card, "en")}</div>
+          <div class="row end" style="margin-top:10px"><button class="btn small ghost" id="redo">Discard card &amp; re-answer</button></div>`
+        : x.status === "dismissed" ? `<p class="muted">Skipped${x.note ? `: ${esc(x.note)}` : ""}.</p>
+          <button class="btn small" id="reopen">Answer anyway</button>`
+        : `<label class="field">Master's answer (speak or type)
+             <textarea id="answer" placeholder="${EXAMPLE}"></textarea></label>
+           <div class="row" style="margin-top:10px">
+             <select id="lang" style="width:auto">${Object.entries(meta.langs).map(([k, v]) =>
+               `<option value="${k}">${v}</option>`).join("")}</select>
+             <button class="btn mic" id="mic">🎙 Speak</button>
+             <button class="btn ghost small" id="example">Use example</button>
+             <div class="spacer" style="flex:1"></div>
+             <button class="btn ghost" id="skip">Not important</button>
+             <button class="btn primary" id="send">Make kotsu card</button>
+           </div>`}`;
+
+      if (card) {
+        wireCardLangs($("#card-slot"), { [card.id]: card });
+        $("#redo").onclick = async () => { await api.del(`/api/cards/${card.id}`); refresh(); };
+        return;
+      }
+      if (x.status === "dismissed") {
+        $("#reopen").onclick = () => { x.status = "open"; renderDetail(); };
+        return;
+      }
+      $("#example").onclick = () => { $("#answer").value = EXAMPLE; $("#lang").value = "ja"; };
+      $("#skip").onclick = async () => {
+        await api.post(`/api/sessions/${id}/surprises/${x.id}/dismiss`, { note: "Master said it wasn't important" });
+        refresh();
+      };
+      $("#send").onclick = async (e) => {
+        const text = $("#answer").value.trim();
+        if (!text) return toast("Record or type the master's answer first.");
+        e.target.disabled = true;
+        e.target.textContent = "Structuring…";
+        try {
+          const c = await api.post(`/api/sessions/${id}/surprises/${x.id}/answer`, { transcript: text, lang: $("#lang").value });
+          toast(`Card created${c.source === "claude" ? " and translated by Claude" : " (offline draft)"}.`);
+          refresh();
+        } catch (err) {
+          toast(esc(err.message), "buzz");
+          e.target.disabled = false;
+          e.target.textContent = "Make kotsu card";
+        }
+      };
+      wireMic($("#mic"), $("#answer"), () => SPEECH[$("#lang").value]);
+    }
+
+    render();
+    const firstOpen = detail.surprises.find((x) => x.status === "open");
+    if (firstOpen) select(firstOpen.id);
+  }
+
+  function wireMic(btn, target, langFn) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { btn.disabled = true; btn.title = "Speech recognition needs Chrome or Edge"; return; }
+    let rec = null;
+    btn.onclick = () => {
+      if (rec) { rec.stop(); return; }
+      rec = new SR();
+      rec.lang = langFn();
+      rec.continuous = true;
+      rec.interimResults = true;
+      const base = target.value ? target.value + " " : "";
+      rec.onresult = (e) => {
+        target.value = base + Array.from(e.results).map((r) => r[0].transcript).join("");
+      };
+      rec.onerror = (e) => toast(`Microphone: ${esc(e.error)}`);
+      rec.onend = () => { rec = null; btn.classList.remove("listening"); btn.textContent = "🎙 Speak"; };
+      rec.start();
+      btn.classList.add("listening");
+      btn.textContent = "■ Stop";
+    };
+  }
+
+  // -- apprentice -----------------------------------------------------------------
+
+  function apprenticeView() {
+    $("#app-view").classList.remove("hidden");
+    const r = s.report;
+    if (!r) {
+      $("#score").textContent = "–";
+      $("#weak").innerHTML = `<div class="empty">No reference ghost existed when this was recorded.</div>`;
+      return;
+    }
+    $("#score").innerHTML = `<span class="${scoreClass(r.overall)}" style="color:var(--${scoreClass(r.overall) || "ink"})">${r.overall.toFixed(0)}</span><span class="muted" style="font-size:24px">%</span>`;
+    $("#channels").innerHTML = meta.channel_order.map((c) => `
+      <div class="chan-row"><span>${esc(meta.channels[c].label)}</span>
+        <div class="meter"><i style="width:${r.channels[c]}%"></i></div>
+        <span class="mono muted">${r.channels[c].toFixed(0)}</span></div>`).join("");
+    $("#weak").innerHTML = r.weak_spots.length ? r.weak_spots.map((w) => `
+      <div class="surprise"><div class="s-top"><b>${clock(w.t_start)}–${clock(w.t_end)}</b>
+        <span class="pill bad">${esc(meta.channels[w.channel].label)}</span></div>
+        <div class="s-sum">${esc(w.message)}</div></div>`).join("")
+      : `<div class="empty">Nothing stood out. Close to the master throughout.</div>`;
+
+    const f = detail.features;
+    new Lanes($("#a-chart"), { channels: meta.channel_order, meta: meta.channels, laneHeight: 70 }).set({
+      t0: 0, t1: f.t.at(-1),
+      series: Object.fromEntries(meta.channel_order.map((c) => [c, series(f, c)])),
+      ghost: Object.fromEntries(meta.channel_order.map((c) => [c, { t: r.ghost_t, v: r.ghost[c] }])),
+      bands: r.weak_spots.map((w) => ({ t0: w.t_start, t1: w.t_end, color: "rgba(226,73,47,0.14)" })),
+    });
+    $("#head-actions").innerHTML = `<a class="btn" href="radar.html#${s.person_id}">Skill passport</a>
+      <a class="btn primary" href="live.html?person=${s.person_id}&skill=${s.skill_id}">Train again</a>`;
+  }
+</script>
+</body>
+</html>
