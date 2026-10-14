@@ -41,6 +41,17 @@ Set `ANTHROPIC_API_KEY` to have Claude structure and translate cards (model `cla
 override with `TSUKUMO_MODEL`). Without it, or with `TSUKUMO_OFFLINE=1`, everything else works and
 cards are built offline.
 
+## Deploy on Vercel
+
+Import the repo in Vercel; `vercel.json` routes everything to one Python function (`api/index.py`)
+that seeds the demo workshop into `/tmp` on cold start (about 7 s). Add `ANTHROPIC_API_KEY` as an
+environment variable if you want Claude-structured cards.
+
+Serverless functions can't hold WebSockets, so on Vercel the phone link is off and *Simulate* asks the
+server to run the whole session in one request (`POST /api/sessions/{id}/replay`), then plays the
+events back in the browser. Each function instance has its own `/tmp` database: edits and new
+sessions are per instance and vanish on the next cold start.
+
 ## Demo script (3 min)
 
 1. **Workshop** page: two retiring masters, four skills, two with nobody ready to take over.
@@ -65,10 +76,11 @@ tsukumo/
   simulate.py   synthetic master/apprentice sessions (demo and tests)
   store.py      SQLite metadata, .npy frames
   services.py   use cases: sessions, review, passports, radar, ledger
-  live.py       WebSocket hub for sessions being recorded
+  live.py       WebSocket hub for sessions being recorded, and HTTP replay
   app.py        FastAPI routes; serves web/
   seed.py       demo workshop
 web/            landing (index), dashboard, live, review, radar, phone client
+api/index.py    Vercel entry point
 tests/          pipeline and API tests
 ```
 
