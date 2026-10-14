@@ -19,3 +19,14 @@ seed(Tsukumo(_store))
 _store.close()
 
 app = create_app()
+
+
+@app.middleware("http")
+async def _debug_path(request, call_next):
+    # temporary: find out what path Vercel hands the function
+    resp = await call_next(request)
+    if resp.status_code == 404:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Not Found", "path": request.url.path, "root": request.scope.get("root_path"),
+                             "raw": request.scope.get("raw_path", b"").decode()}, status_code=404)
+    return resp
