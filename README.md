@@ -68,7 +68,7 @@ tsukumo/
   live.py       WebSocket hub for sessions being recorded
   app.py        FastAPI routes; serves web/
   seed.py       demo workshop
-web/            dashboard (index, live, review, radar) and the phone client
+web/            landing (index), dashboard, live, review, radar, phone client
 tests/          pipeline and API tests
 ```
 

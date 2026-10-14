@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSUKUMO · The tool remembers</title>
+  <meta name="description" content="A phone on the master's tool records how they really work, asks why, and coaches apprentices in their own language at the same stroke.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500&family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
+  <script>try{if(localStorage.getItem("tsukumo-theme")==="light")document.documentElement.dataset.theme="light"}catch(e){}document.documentElement.classList.add("js")</script>
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    body { font-size: 17px; }
+    .wrap { max-width: 1320px; margin: 0 auto; padding: 0 28px; }
+    .bar { display: flex; align-items: center; gap: 28px; padding: 18px 28px; max-width: 1320px; margin: 0 auto; }
+    .bar nav { display: flex; gap: 22px; margin-left: auto; }
+    .bar nav a { text-decoration: none; color: var(--muted); }
+    .bar nav a:hover { color: var(--ink); }
+    .bar .btn { margin-left: 4px; }
+
+    .hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 18px; padding-top: 18px; }
+    .hero-copy { background: var(--ai); color: var(--ai-ink); border-radius: var(--radius); padding: 40px; display: flex; flex-direction: column; justify-content: space-between; gap: 40px; min-height: 620px; }
+    .hero h1 { font-size: clamp(48px, 6.4vw, 96px); line-height: 0.95; letter-spacing: -0.05em; font-weight: 500; }
+    .hero h1 span { display: block; opacity: 0.55; }
+    .hero p { font-size: 19px; max-width: 30em; margin: 0 0 26px; }
+    .hero .row { gap: 12px; }
+    .hero-copy .btn:not(.primary) { background: transparent; border-color: color-mix(in srgb, currentColor 40%, transparent); }
+    .photo { border-radius: var(--radius); overflow: hidden; position: relative; background: var(--panel-2); margin: 0; }
+    .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .hero .photo { min-height: 620px; }
+    .hero .photo img { object-position: 60% 50%; }
+    .stroke-tag {
+      position: absolute; left: 22px; bottom: 22px; right: 22px; max-width: 360px;
+      background: var(--moegi); color: var(--moegi-ink); border-radius: 18px; padding: 16px 18px;
+    }
+    .stroke-tag b { display: block; font-size: 17px; font-weight: 500; }
+    .stroke-tag span { font-size: 14px; opacity: 0.8; }
+
+    section.block { padding-top: 150px; }
+    .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: stretch; }
+    .statement { background: var(--panel); border-radius: var(--radius); padding: 40px; display: flex; flex-direction: column; justify-content: space-between; gap: 40px; }
+    .statement h2 { font-size: clamp(34px, 3.6vw, 52px); line-height: 1.02; letter-spacing: -0.04em; }
+    .statement p { font-size: 19px; max-width: 32em; margin: 0; }
+    .habits { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+    .habits li { background: var(--panel-2); border-radius: 14px; padding: 12px 16px; display: flex; justify-content: space-between; gap: 16px; }
+    .habits li span { color: var(--muted); white-space: nowrap; }
+    .split .photo { min-height: 560px; }
+
+    .loop h2, .meet h2, .who h2 { font-size: clamp(34px, 3.6vw, 52px); letter-spacing: -0.04em; line-height: 1.02; max-width: 16em; margin-bottom: 34px; }
+    .loop ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; counter-reset: none; }
+    .loop li { border-radius: var(--radius); padding: 28px; min-height: 300px; display: flex; flex-direction: column; justify-content: flex-end; gap: 10px; }
+    .loop li h3 { font-size: 26px; letter-spacing: -0.03em; line-height: 1.05; }
+    .loop li p { margin: 0; font-size: 16px; }
+    .loop li:nth-child(1) { background: var(--kaki); color: var(--kaki-ink); }
+    .loop li:nth-child(2) { background: var(--fuji); color: var(--fuji-ink); }
+    .loop li:nth-child(3) { background: var(--moegi); color: var(--moegi-ink); }
+    .loop li:nth-child(4) { background: var(--matcha); color: var(--matcha-ink); }
+    .loop li:nth-child(odd) { min-height: 360px; }
+
+    .meet { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 18px; align-items: start; }
+    .meet .intro { padding-top: 10px; }
+    .meet .intro p { font-size: 19px; max-width: 28em; }
+    .meet .langs button { font-size: 15px; padding: 8px 16px; border-radius: 999px; }
+    .meet .kcard { border: 0; border-radius: var(--radius); background: var(--panel); padding: 30px; gap: 14px; }
+    .meet .kcard .k-title { font-size: 28px; letter-spacing: -0.03em; }
+    .meet .kcard dl { grid-template-columns: 70px 1fr; font-size: 17px; gap: 12px 16px; }
+
+    .print { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; }
+    .print .photo { aspect-ratio: 1400 / 1079; }
+    .print .statement { background: var(--kaki); color: var(--kaki-ink); }
+
+    .who ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+    .who li { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 18px; background: var(--panel); border-radius: var(--radius); padding: 34px 40px; align-items: baseline; }
+    .who li h3 { font-size: clamp(26px, 2.6vw, 38px); letter-spacing: -0.035em; line-height: 1.05; }
+    .who li p { margin: 0; font-size: 18px; }
+
+    .close { margin-top: 150px; background: var(--solid); color: var(--solid-ink); border-radius: var(--radius); padding: 56px 40px 40px; }
+    .close .row { justify-content: space-between; align-items: flex-end; gap: 28px; }
+    .close p { font-size: 22px; max-width: 24em; margin: 0; letter-spacing: -0.01em; }
+    .close .btn.primary { background: var(--moegi); border-color: var(--moegi); color: var(--moegi-ink); font-size: 16px; padding: 14px 24px; }
+    .close .mark-word { font-size: clamp(64px, 15.5vw, 236px); letter-spacing: -0.06em; line-height: 0.8; font-weight: 500; margin-top: 70px; }
+    .credits { color: var(--muted); font-size: 13px; padding: 22px 0 40px; display: grid; gap: 4px; }
+    .credits a { color: inherit; }
+
+    /* entrance: parts of each section rise in order, once */
+    .js .rise > * { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .js .rise.in > * { opacity: 1; transform: none; }
+    .js .rise.in > *:nth-child(2) { transition-delay: 80ms; }
+    .js .rise.in > *:nth-child(3) { transition-delay: 160ms; }
+    .js .rise.in > *:nth-child(4) { transition-delay: 240ms; }
+    .hero .photo img { animation: drift 24s ease-in-out infinite alternate; }
+    @keyframes drift { from { transform: scale(1.04); } to { transform: scale(1.12) translateX(-2%); } }
+    .loop li, .who li, .btn { transition: transform 0.25s ease; }
+    .loop li:hover, .who li:hover { transform: translateY(-4px); }
+    .btn:active { transform: scale(0.97); }
+    @media (prefers-reduced-motion: reduce) {
+      .js .rise > * { opacity: 1; transform: none; transition: none; }
+      .hero .photo img { animation: none; }
+      .loop li:hover, .who li:hover { transform: none; }
+    }
+
+    @media (max-width: 1000px) {
+      .hero, .split, .meet, .print { grid-template-columns: 1fr; }
+      .loop ol { grid-template-columns: 1fr 1fr; }
+      .who li { grid-template-columns: 1fr; }
+      .hero-copy, .hero .photo { min-height: 0; }
+      .hero .photo { aspect-ratio: 4 / 3; }
+      .split .photo { min-height: 0; aspect-ratio: 4 / 3; }
+    }
+    @media (max-width: 640px) {
+      .wrap, .bar { padding-left: 16px; padding-right: 16px; }
+      .bar nav a:not(.btn) { display: none; }
+      .hero-copy, .statement, .close { padding: 26px 22px; }
+      .loop ol { grid-template-columns: 1fr; }
+      .loop li, .loop li:nth-child(odd) { min-height: 0; padding: 24px; }
+      .who li { padding: 24px 22px; }
+      section.block { padding-top: 90px; }
+      .close { margin-top: 90px; }
+      .stroke-tag { left: 14px; right: 14px; bottom: 14px; }
+    }
+  </style>
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="index.html"><i class="mark"></i><b>TSUKUMO</b><span>付喪</span></a>
+  <nav>
+    <a href="#how">How it works</a>
+    <a href="#who">Who it's for</a>
+    <a class="btn primary" href="dashboard.html">Open the workshop</a>
+  </nav>
+  <span id="switch-slot"></span>
+</header>
+
+<main class="wrap" style="max-width:1320px;padding-top:0">
+  <section class="hero">
+    <div class="hero-copy rise">
+      <h1>The master retires. <span>The tool remembers.</span></h1>
+      <div>
+        <p>A phone clipped to the master's tool records how they really work, asks them why at the moments
+          no manual explains, and coaches the next hands at the same stroke, in their own language.</p>
+        <div class="row">
+          <a class="btn primary" href="dashboard.html">Open the workshop</a>
+          <a class="btn" href="live.html?person=nguyen&amp;skill=honbazuke&amp;sim=novice&amp;speed=2">Watch a training run</a>
+        </div>
+      </div>
+    </div>
+    <figure class="photo">
+      <img src="assets/whetstone-knife-sharpening-2015-01.jpg" width="1920" height="1280"
+           alt="Two hands holding a kitchen knife flat against a dark Japanese whetstone on a bamboo base">
+      <div class="stroke-tag">
+        <b>Stroke 28: listen for the stone going dry</b>
+        <span>The sound has turned high and scratchy. Stop and splash water.</span>
+      </div>
+    </figure>
+  </section>
+
+  <section class="block">
+    <div class="split">
+      <div class="statement rise">
+        <h2>Forty-one years at the bench, and none of it written down.</h2>
+        <p>Tanaka, the demo workshop's edge finisher, retires in 2027. In one recording TSUKUMO found the
+          habits he never mentions, because to him they are just how it's done.</p>
+        <ul class="habits">
+          <li>Splashes the stone when its sound turns dry and high <span>4 times</span></li>
+          <li>Stops to feel for the burr with a thumb <span>stroke 68</span></li>
+          <li>Flips once the burr runs the full edge <span>after the check</span></li>
+          <li>Finishes steeper, lighter and slower <span>the last strokes</span></li>
+        </ul>
+      </div>
+      <figure class="photo">
+        <img src="assets/forge-de-tsuneharu-matsuda-3-2016-04.jpg" width="1920" height="1440" loading="lazy"
+             alt="A dark Japanese forge: hammers on an anvil, a straw mat and a clay pot of quench water on a soot-black floor">
+      </figure>
+    </div>
+  </section>
+
+  <section class="block loop" id="how">
+    <h2>Four steps, and the master only talks for the second.</h2>
+    <ol class="rise">
+      <li><h3>Capture</h3><p>The master just works. Angle, rhythm, pressure and the stone's sound stream from the phone on the tool.</p></li>
+      <li><h3>Ask only about surprises</h3><p>Moments where they broke from steady work become a handful of questions, answered by voice after the shift.</p></li>
+      <li><h3>Coach at the same stroke</h3><p>Apprentices work against the master's ghost. The tool buzzes on drift and the master's tip appears where his habit happened.</p></li>
+      <li><h3>Certify and plan</h3><p>Measured skill passports, and a radar of which skills leave with whom, and when.</p></li>
+    </ol>
+  </section>
+
+  <section class="block meet">
+    <div class="intro rise">
+      <h2>Read his tip in your language.</h2>
+      <p>Every answer becomes a kotsu card: when it applies, what to do, and why. Claude structures it once
+        and writes it in Japanese, English, Vietnamese and Indonesian, so the apprentice from Nam Dinh gets
+        the same reason the master gave.</p>
+    </div>
+    <div id="card-slot">
+      <article class="kcard">
+        <div class="k-title">Listen for the stone going dry</div>
+        <dl>
+          <dt>When</dt><dd>When the sharpening sound turns higher and scratchy</dd>
+          <dt>Do</dt><dd>Stop and splash water on the stone</dd>
+          <dt>Why</dt><dd>A dry stone loses its slurry, so the blade catches and heats up. The slurry is what actually sharpens.</dd>
+        </dl>
+      </article>
+    </div>
+  </section>
+
+  <section class="block print">
+    <figure class="photo">
+      <img src="assets/masamune-ukiyo-e.jpg" width="1400" height="1079" loading="lazy"
+           alt="Edo-period woodblock print: the swordsmith Masamune kneels at the anvil while his apprentice swings the hammer">
+    </figure>
+    <div class="statement rise">
+      <h2>Apprenticeship used to mean ten years at the master's side.</h2>
+      <p>Most of the new hands in Japan's workshops now arrive from abroad, with a few years and a language
+        between them and the master. TSUKUMO keeps the master at their side after he's gone: his stroke as
+        a ghost on the tool, his reasons on the card.</p>
+    </div>
+  </section>
+
+  <section class="block who" id="who">
+    <h2>Built for the three people in the room.</h2>
+    <ul class="rise">
+      <li><h3>The master</h3><p>Works as usual and answers a few questions. Earns a royalty each time one of their cards coaches someone, during their career and after it.</p></li>
+      <li><h3>The apprentice</h3><p>Gets a buzz on the tool when the angle drifts, the master's reasons in their own language, and a passport that proves the skill.</p></li>
+      <li><h3>The workshop</h3><p>Sees which skills retire with whom, who has measurably taken them over, and where nobody has yet.</p></li>
+    </ul>
+  </section>
+
+  <footer class="close">
+    <div class="row">
+      <p>Clip a phone to the tool, record one session, and see the questions it would ask your master.</p>
+      <a class="btn primary" href="dashboard.html">Open the workshop</a>
+    </div>
+    <div class="mark-word">TSUKUMO 付喪</div>
+  </footer>
+  <div class="credits">
+    <span>Workshop, people and recordings in the demo are fictional. Photographs show the craft, not the demo workshop.</span>
+    <span>Photos: <a href="https://commons.wikimedia.org/wiki/File:Whetstone_Knife_Sharpening,_2015-(01).jpg">"Whetstone Knife Sharpening"</a> by Didriks, CC BY 2.0;
+      <a href="https://commons.wikimedia.org/wiki/File:Forge_de_Tsuneharu_Matsuda_-_3_-_2016-04-19.jpg">"Forge de Tsuneharu Matsuda"</a> by MathieuMD, CC BY-SA 4.0;
+      <a href="https://commons.wikimedia.org/wiki/File:Master-Swordsmith-Goro-Masamune-Ukiyo-e.png">"Master Swordsmith Goro Masamune"</a>, ukiyo-e, public domain. Via Wikimedia Commons.</span>
+  </div>
+</main>
+
+<script type="module">
+  import { api } from "./js/api.js";
+  import { cardHTML, wireCardLangs, themeSwitch, wireThemeSwitches, $ } from "./js/ui.js";
+
+  $("#switch-slot").innerHTML = themeSwitch();
+  wireThemeSwitches();
+
+  const io = new IntersectionObserver((entries) => entries.forEach((e) => {
+    if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }), { threshold: 0.15 });
+  document.querySelectorAll(".rise").forEach((el) => io.observe(el));
+
+  // The live part: a real card from the workshop, switchable between languages.
+  try {
+    const cards = await api.get("/api/cards");
+    const card = cards.find((c) => /dry|water/i.test(c.content.en?.title || "")) || cards[0];
+    if (card) {
+      $("#card-slot").innerHTML = cardHTML(card, "en");
+      wireCardLangs($("#card-slot"), { [card.id]: card });
+    }
+  } catch { /* the static card above stays */ }
+</script>
+</body>
+</html>
