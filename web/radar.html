@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSUKUMO · Succession</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500&family=Shippori+Mincho:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<main>
+  <div class="page-head">
+    <div>
+      <h1>Succession <span class="ja">技能継承</span></h1>
+      <p>Which skills retire with whom, who has measurably taken them over, and what the masters have earned
+        from teaching through their tools.</p>
+    </div>
+  </div>
+
+  <section class="panel" style="margin-bottom:18px">
+    <div class="panel-head"><h2>Skill extinction radar <span class="ja">消える技</span></h2></div>
+    <table>
+      <thead><tr><th>Skill</th><th>Held by</th><th>Ready successors</th><th class="num">Years left</th>
+        <th class="num">Cards</th><th>Risk</th></tr></thead>
+      <tbody id="radar"></tbody>
+    </table>
+  </section>
+
+  <section class="grid side">
+    <div class="panel">
+      <div class="panel-head"><h2>Skill passports <span class="ja">技能証明</span></h2>
+        <span class="muted" id="rule" style="font-size:13px"></span></div>
+      <div class="grid" id="passports" style="gap:14px"></div>
+    </div>
+    <div class="panel" style="align-self:start">
+      <div class="panel-head"><h2>Kotsu royalties <span class="ja">伝承料</span></h2></div>
+      <p class="muted" style="margin-top:0;font-size:13px">Masters are paid each time one of their cards coaches an apprentice,
+        during their career and after it. Teaching becomes worth more than guarding.</p>
+      <table><thead><tr><th>Master</th><th class="num">Cards</th><th class="num">Coached</th><th class="num">Earned</th></tr></thead>
+        <tbody id="ledger"></tbody></table>
+      <p class="faint" style="font-size:12px">Illustrative rate.</p>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+  import { api, info } from "./js/api.js";
+  import { header, esc, $, initials, scoreClass } from "./js/ui.js";
+
+  header();
+  const meta = await info();
+  const [radar, ledger, people] = await Promise.all([api.get("/api/radar"), api.get("/api/ledger"), api.get("/api/people")]);
+  const RISK = { critical: "var(--bad)", at_risk: "var(--warn)", covered: "var(--ok)" };
+
+  $("#radar").innerHTML = radar.map((r) => `
+    <tr>
+      <td><b>${esc(r.skill.name)}</b><span class="ja">${esc(r.skill.name_ja)}</span>
+        <div class="faint" style="font-size:12px">${esc(r.skill.description)}</div></td>
+      <td>${r.masters.map((m) => `${esc(m.name)} <span class="faint">→ ${m.retire_year ?? "?"}</span>`).join("<br>") || '<span class="faint">nobody</span>'}</td>
+      <td>${r.successors.map((s) => `${esc(s.name)} ${s.measured ? '<span class="pill ok">measured</span>' : '<span class="pill">declared</span>'}`).join("<br>")
+        || '<span class="pill bad">none</span>'}</td>
+      <td class="num">${r.years_left == null ? "–" : r.years_left <= 0 ? "this year" : r.years_left}</td>
+      <td class="num">${r.cards}</td>
+      <td><div class="row" style="gap:8px"><div class="risk"><i style="width:${r.risk}%;background:${RISK[r.status]}"></i></div>
+        <span style="color:${RISK[r.status]};font-size:13px">${r.status.replace("_", " ")}</span></div></td>
+    </tr>`).join("");
+
+  $("#ledger").innerHTML = ledger.map((l) => `
+    <tr><td><div class="person"><span class="avatar">${initials(l.master.name)}</span>
+      <div>${esc(l.master.name)}<small>${esc(l.master.name_native || "")}</small></div></div></td>
+      <td class="num">${l.cards}</td><td class="num">${l.views}</td>
+      <td class="num">¥${l.credits_yen.toLocaleString()}</td></tr>`).join("");
+
+  $("#rule").textContent = `Certified at ${meta.certify.score}% on ${meta.certify.sessions} sessions`;
+  const apprentices = people.filter((p) => p.role === "apprentice");
+  const passports = await Promise.all(apprentices.map((p) => api.get(`/api/passport/${p.id}`)));
+  $("#passports").innerHTML = passports.map(({ person, skills, cards_learned }) => `
+    <div class="kcard" id="${person.id}" style="border-left-color:${skills.some((s) => s.certified) ? "var(--ok)" : "var(--line)"}">
+      <div class="row" style="justify-content:space-between">
+        <div class="person"><span class="avatar">${initials(person.name)}</span>
+          <div><b>${esc(person.name)}</b><small>${esc(person.origin || "")} · ${esc(meta.langs[person.lang])} · ${cards_learned} cards learned</small></div></div>
+      </div>
+      ${skills.length ? skills.map((s) => `
+        <div class="row" style="justify-content:space-between">
+          <div>${esc(s.skill_name)} ${s.certified ? '<span class="pill ok">certified</span>'
+            : `<span class="pill">${s.to_certify} more passing session${s.to_certify === 1 ? "" : "s"}</span>`}</div>
+          <div class="row" style="gap:14px">${spark(s.history.map((h) => h.score))}
+            <span class="mono">best <b style="color:var(--${scoreClass(s.best)})">${s.best.toFixed(0)}</b></span></div>
+        </div>`).join("") : '<div class="faint">No measured sessions yet.</div>'}
+    </div>`).join("");
+
+  if (location.hash) document.querySelector(location.hash)?.scrollIntoView({ block: "center" });
+
+  function spark(values) {
+    const w = 120, h = 28;
+    if (values.length < 2) return "";
+    const pts = values.map((v, i) => `${(i / (values.length - 1)) * (w - 6) + 3},${h - 3 - (v / 100) * (h - 6)}`);
+    const thr = h - 3 - (meta.certify.score / 100) * (h - 6);
+    return `<svg class="spark" width="${w}" height="${h}"><line x1="0" x2="${w}" y1="${thr}" y2="${thr}" stroke="var(--line)" stroke-dasharray="3 3"/>
+      <polyline points="${pts.join(" ")}" fill="none" stroke="var(--gold)" stroke-width="2"/>
+      ${pts.map((p) => `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="2.5" fill="var(--gold)"/>`).join("")}</svg>`;
+  }
+</script>
+</body>
+</html>
