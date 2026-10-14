@@ -65,7 +65,10 @@
 
   const [sessions, cards, radar, people] = await Promise.all([
     api.get("/api/sessions"), api.get("/api/cards"), api.get("/api/radar"), api.get("/api/people"),
-  ]);
+  ]).catch((e) => {
+    $("#lead").innerHTML = `<h1>Can't reach the workshop server.</h1><p class="muted">${esc(e.message)}. Start TSUKUMO and reload.</p>`;
+    throw e;
+  });
   const done = sessions.filter((s) => s.status === "done").sort((a, b) => a.created_at - b.created_at);
   const scored = done.filter((s) => s.role === "apprentice" && s.score != null);
   const masters = people.filter((p) => p.role === "master");

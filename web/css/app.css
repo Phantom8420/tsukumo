@@ -260,6 +260,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .tile.f-moegi { background: var(--moegi); color: var(--moegi-ink); }
 .tile.f-kaki { background: var(--kaki); color: var(--kaki-ink); }
 .tile.f-moegi .sub, .tile.f-kaki .sub, .tile.f-ai .sub { color: inherit; opacity: 0.75; }
+.tile.f-moegi .ja, .tile.f-kaki .ja, .tile.f-ai .ja { color: inherit; opacity: 0.7; }
 .tile-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .tile-head .sub { margin: 0; }
 a.tile { text-decoration: none; color: inherit; }
