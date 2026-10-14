@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSUKUMO · Record &amp; train</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500&family=Shippori+Mincho:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    #card-now .kcard { border-left-width: 5px; animation: rise .3s ease-out; }
+    #card-now .k-title { font-size: 24px; }
+    .feed { display: grid; gap: 6px; max-height: 210px; overflow: auto; font-size: 13px; }
+    .feed div { display: flex; gap: 10px; }
+    .feed b { color: var(--accent); font-weight: 500; min-width: 38px; }
+    .flash { animation: flash .5s ease-out; }
+    @keyframes flash { from { box-shadow: 0 0 0 3px var(--accent) inset; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="page-head">
+    <div>
+      <h1 id="title">Record &amp; train <span class="ja">記録・稽古</span></h1>
+      <p id="subtitle">Pick who is at the bench. A master's session is recorded for review; an apprentice trains live against the master's ghost.</p>
+    </div>
+    <div class="row" id="head-actions"></div>
+  </div>
+
+  <section class="panel" id="setup" style="max-width:760px">
+    <div class="grid cols-2">
+      <label class="field">Who is working <select id="person"></select></label>
+      <label class="field">Skill <select id="skill"></select></label>
+    </div>
+    <p class="muted" id="setup-note" style="margin:14px 0"></p>
+    <div class="row end"><button class="btn primary" id="start">Start session</button></div>
+  </section>
+
+  <section class="grid side hidden" id="live">
+    <div class="grid" style="align-content:start">
+      <div class="panel">
+        <div class="panel-head">
+          <h2 id="live-title">Live</h2>
+          <div class="row"><span class="status-dot" id="dot"></span><span class="muted" id="device">waiting for the tool…</span></div>
+        </div>
+        <canvas class="lanes" id="chart"></canvas>
+        <div class="legend"><span><i style="background:var(--accent)"></i>now</span>
+          <span id="ghost-legend"><i style="background:var(--ghost)"></i>master's ghost at the same stroke</span></div>
+      </div>
+      <div id="card-now"></div>
+    </div>
+
+    <div class="grid" style="align-content:start">
+      <div class="panel" id="connect">
+        <h3 style="margin-bottom:10px">Connect the tool <span class="ja">道具をつなぐ</span></h3>
+        <div class="qr-box">
+          <img id="qr" alt="QR code for the phone">
+          <a class="mono muted" id="phone-url" style="font-size:12px;word-break:break-all"></a>
+          <span class="faint" style="font-size:12px">Scan with the phone strapped to the tool (same Wi-Fi).</span>
+        </div>
+        <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+        <div class="row">
+          <select id="profile" style="width:auto"></select>
+          <select id="speed" style="width:auto"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select>
+          <button class="btn" id="simulate">Simulate</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="justify-content:space-between;align-items:flex-end">
+          <div class="stat"><b id="strokes">0</b><span>strokes</span></div>
+          <div class="stat" id="match-box"><b id="match">–</b><span>live match to master</span></div>
+          <div class="stat"><b id="clock">0:00</b><span>elapsed</span></div>
+        </div>
+      </div>
+
+      <div class="panel" id="feed-panel">
+        <h3 style="margin-bottom:8px">Cues sent to the tool <span class="ja">合図</span></h3>
+        <div class="feed" id="feed"><span class="faint" id="feed-empty">None yet.</span></div>
+      </div>
+
+      <div class="panel hidden" id="result"></div>
+      <div class="row end"><button class="btn" id="end">End session</button></div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+  import { api, info, socket } from "./js/api.js";
+  import { Lanes, Rolling, clock } from "./js/chart.js";
+  import { header, esc, $, cardHTML, toast, scoreClass } from "./js/ui.js";
+
+  header();
+  const meta = await info();
+  const params = new URLSearchParams(location.search);
+  const [people, skills] = await Promise.all([api.get("/api/people"), api.get("/api/skills")]);
+
+  $("#person").innerHTML = ["master", "apprentice"].map((role) => `<optgroup label="${role}s">${
+    people.filter((p) => p.role === role).map((p) =>
+      `<option value="${p.id}">${esc(p.name)}${p.name_native && p.name_native !== p.name ? ` · ${esc(p.name_native)}` : ""}</option>`).join("")
+  }</optgroup>`).join("");
+  $("#skill").innerHTML = skills.map((k) => `<option value="${k.id}">${esc(k.name)} · ${esc(k.name_ja)}</option>`).join("");
+  if (params.get("person")) $("#person").value = params.get("person");
+  if (params.get("skill")) $("#skill").value = params.get("skill");
+  $("#profile").innerHTML = meta.profiles.map((p) => `<option>${p}</option>`).join("");
+
+  const personOf = (id) => people.find((p) => p.id === id);
+  const updateNote = () => {
+    const p = personOf($("#person").value), k = skills.find((s) => s.id === $("#skill").value);
+    $("#setup-note").textContent = p.role === "master"
+      ? `${p.name} works normally. Afterwards, TSUKUMO will flag the moments worth asking about.`
+      : k.reference_session_id
+        ? `${p.name} trains against the master's ghost. Cues and cards appear in ${meta.langs[p.lang]}.`
+        : `No master reference for this skill yet: record a master session first.`;
+    $("#start").disabled = p.role === "apprentice" && !k.reference_session_id;
+  };
+  $("#person").onchange = $("#skill").onchange = updateNote;
+  updateNote();
+
+  let session, person, ws, chart, rolling, credit = { sum: 0, n: 0 };
+
+  $("#start").onclick = async () => {
+    session = await api.post("/api/sessions", { skill_id: $("#skill").value, person_id: $("#person").value });
+    person = personOf(session.person_id);
+    $("#setup").classList.add("hidden");
+    $("#live").classList.remove("hidden");
+    $("#title").innerHTML = `${esc(person.name)} <span class="ja">${esc(session.skill_name)}</span>`;
+    $("#subtitle").textContent = person.role === "master"
+      ? "Recording the master. Work normally; nothing to do on screen."
+      : `Training against the master's ghost. Cues and cards in ${meta.langs[person.lang]}.`;
+    $("#live-title").textContent = person.role === "master" ? "Master at work" : "Apprentice vs ghost";
+    $("#profile").value = person.role === "master" ? "master" : "novice";
+    if (person.role === "master") { $("#match-box").classList.add("hidden"); $("#ghost-legend").classList.add("hidden"); }
+
+    const url = `${meta.phone_base}/phone.html?s=${session.id}`;
+    $("#qr").src = `/api/qr?data=${encodeURIComponent(url)}`;
+    $("#phone-url").textContent = url;
+    $("#phone-url").href = url;
+
+    chart = new Lanes($("#chart"), { channels: meta.channel_order, meta: meta.channels, laneHeight: 64, live: true });
+    rolling = { live: new Rolling(meta.channel_order), ghost: new Rolling(meta.channel_order) };
+    chart.set({ t0: 0, t1: 25 });
+    ws = socket(`/ws/watch/${session.id}`, onEvent);
+  };
+
+  $("#simulate").onclick = async () => {
+    try {
+      await api.post(`/api/sessions/${session.id}/simulate`, { profile: $("#profile").value, speed: +$("#speed").value });
+    } catch (e) { toast(esc(e.message), "buzz"); }
+  };
+
+  $("#end").onclick = async () => {
+    if (!session) return;
+    try { await api.post(`/api/sessions/${session.id}/end`); } catch (e) { toast(esc(e.message)); }
+  };
+
+  function onEvent(e) {
+    if (e.type === "device") {
+      $("#dot").classList.toggle("on", e.connected);
+      $("#device").textContent = e.connected ? `${e.source} streaming` : "tool disconnected";
+      if (e.connected) $("#connect").classList.add("hidden");
+    } else if (e.type === "tick") {
+      rolling.live.push(e.t, e.live);
+      rolling.ghost.push(e.t, e.ghost);
+      chart.set({ ...rolling.live.window(e.t), series: rolling.live.data, ghost: person.role === "master" ? {} : rolling.ghost.data });
+      $("#strokes").textContent = Math.floor(e.k);
+      $("#clock").textContent = clock(e.t);
+      if (e.ghost && e.live.tempo > 0 && e.ghost.motion > 0.8) {
+        let c = 0, wsum = 0;
+        for (const [ch, w] of Object.entries({ angle: .35, motion: .15, tempo: .2, loudness: .15, tone: .15 })) {
+          const d = (e.live[ch] - e.ghost[ch]) / meta.tolerance[ch];
+          c += w * Math.exp(-Math.LN2 * d * d);
+          wsum += w;
+        }
+        credit.sum += c / wsum; credit.n += 1;
+        const m = 100 * credit.sum / credit.n;
+        $("#match").innerHTML = `<span style="color:var(--${scoreClass(m) || "ink"})">${m.toFixed(0)}</span>`;
+      }
+    } else if (e.type === "buzz") {
+      const feed = $("#feed");
+      $("#feed-empty")?.remove();
+      feed.insertAdjacentHTML("afterbegin",
+        `<div><b>${clock(e.t)}</b><span>${esc(e.message)}${person.lang !== "en" ? ` <span class="faint">· ${esc(e.text.en)}</span>` : ""}</span></div>`);
+      $("#chart").parentElement.classList.remove("flash");
+      void $("#chart").offsetWidth;
+      $("#chart").parentElement.classList.add("flash");
+    } else if (e.type === "card") {
+      $("#card-now").innerHTML = cardHTML(e.card, person.lang, { showLangs: false, sub: "ja" });
+      toast(`<b>Kotsu card</b> · ${esc(e.card.content[person.lang]?.title || e.card.content.en.title)}`);
+    } else if (e.type === "analysing") {
+      $("#device").textContent = "analysing…";
+    } else if (e.type === "summary") {
+      showResult(e);
+    } else if (e.type === "error") {
+      toast(esc(e.message), "buzz", 8000);
+      $("#device").textContent = e.message;
+    }
+  }
+
+  function showResult(e) {
+    $("#dot").classList.remove("on");
+    $("#device").textContent = "session finished";
+    $("#end").classList.add("hidden");
+    const box = $("#result");
+    box.classList.remove("hidden");
+    if (e.role === "master") {
+      box.innerHTML = `<h3>Recorded ${e.strokes} strokes in ${clock(e.duration)}</h3>
+        <p class="muted">${e.surprises} moment${e.surprises === 1 ? "" : "s"} worth asking the master about.</p>
+        <a class="btn primary" href="review.html?s=${e.session_id}">Review with the master</a>`;
+    } else {
+      const r = e.report;
+      box.innerHTML = r ? `<div class="muted">Final match to master</div>
+        <div class="big-score" style="color:var(--${scoreClass(r.overall) || "ink"})">${r.overall.toFixed(0)}%</div>
+        ${r.weak_spots.slice(0, 2).map((w) => `<p class="muted" style="margin:6px 0">${clock(w.t_start)} · ${esc(w.message)}</p>`).join("")}
+        <div class="row" style="margin-top:10px"><a class="btn primary" href="review.html?s=${e.session_id}">Full report</a>
+          <a class="btn" href="radar.html#${person.id}">Passport</a></div>`
+        : `<p class="muted">Recorded. No reference ghost to score against.</p>`;
+    }
+  }
+
+  // One-link demo: live.html?person=nguyen&skill=honbazuke&sim=novice&speed=2
+  if (params.get("sim")) {
+    await $("#start").onclick();
+    $("#profile").value = params.get("sim");
+    $("#speed").value = params.get("speed") || "1";
+    $("#simulate").onclick();
+  }
+</script>
+</body>
+</html>
