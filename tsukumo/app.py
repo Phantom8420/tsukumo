@@ -89,9 +89,11 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
         port = request.url.port or (443 if request.url.scheme == "https" else 80)
         return {
             "phone_base": f"{request.url.scheme}://{lan_ip()}:{port}",
-            "channels": config.CHANNEL_META,
-            "channel_order": config.CHANNELS,
-            "tolerance": config.TOLERANCE,
+            "kinds": {k: {"raw": v["raw"], "progress": v["progress"], "channel_order": list(v["channels"]),
+                          "channels": {c: {f: m[f] for f in ("label", "ja", "unit")} for c, m in v["channels"].items()},
+                          "tolerance": {c: m["tol"] for c, m in v["channels"].items()},
+                          "weights": {c: m["weight"] for c, m in v["channels"].items()}}
+                      for k, v in config.KINDS.items()},
             "langs": config.LANG_NAMES,
             "profiles": list(PROFILES),
             # Serverless hosts can't hold WebSockets: no phone, and the simulator replays over HTTP.

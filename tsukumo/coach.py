@@ -14,11 +14,14 @@ from collections import deque
 
 import numpy as np
 
-from .config import CHANNELS, FS
-from .signals import Features, StrokeCounter
+from .config import DEFAULT_KIND, FS, KINDS
+from .signals import Features, HoldTimer, StrokeCounter
 
 # Live thresholds are a bit looser than scoring tolerances: a buzz has to be worth it.
-LIVE_TOL = {"angle": 2.5, "loudness": 5.0, "tempo": 22.0}
+LIVE_TOL = {
+    "sharpen": {"angle": 2.5, "loudness": 5.0, "tempo": 22.0},
+    "heat": {"hue": 5.0, "brightness": 12.0},
+}
 SUSTAIN_S = 0.6
 COOLDOWN_S = 3.0
 STEADY_MARGIN_S = 1.5
@@ -26,7 +29,8 @@ RESUME_GRACE_S = 1.0
 GLOBAL_COOLDOWN_S = 2.0
 TICK_S = 0.1
 
-PATTERNS = {"angle": [90, 60, 90], "loudness": [250], "tempo": [40, 40, 40, 40, 40]}
+PATTERNS = {"angle": [90, 60, 90], "loudness": [250], "tempo": [40, 40, 40, 40, 40],
+            "hue": [300], "brightness": [120, 80, 120]}
 
 MESSAGES = {
     ("angle", 1): {"en": "Lower the blade ~{d}°", "ja": "刃を約{d}°寝かせて",
@@ -41,6 +45,14 @@ MESSAGES = {
                    "vi": "Chậm lại", "id": "Pelan-pelan"},
     ("tempo", -1): {"en": "A little faster", "ja": "もう少し速く",
                     "vi": "Nhanh hơn một chút", "id": "Sedikit lebih cepat"},
+    ("hue", 1): {"en": "Too hot - ease off the fire", "ja": "熱すぎ、火から離して",
+                 "vi": "Quá nóng, đưa ra xa lửa", "id": "Terlalu panas, jauhkan dari api"},
+    ("hue", -1): {"en": "Not hot enough yet", "ja": "まだ温度が足りない",
+                  "vi": "Chưa đủ nóng", "id": "Belum cukup panas"},
+    ("brightness", 1): {"en": "Glowing too bright - pull back", "ja": "明るすぎ、少し引いて",
+                        "vi": "Sáng quá, kéo ra một chút", "id": "Terlalu terang, tarik sedikit"},
+    ("brightness", -1): {"en": "Glow too dim - more heat", "ja": "赤めが足りない、もう少し火に",
+                         "vi": "Chưa đủ sáng, thêm lửa", "id": "Kurang terang, tambah panas"},
 }
 
 
@@ -108,12 +120,44 @@ class LiveTracker:
         return len(st) + min(1.0, (self.t - st[-1]) / max(interval, 1e-3)) * 0.999
 
 
+class HeatTracker:
+    """Online version of the heat-treatment channels. Progress is simply the clock."""
+
+    def __init__(self):
+        self.hue = _Ema(0.25)
+        self.bright = _Ema(0.25)
+        self.energy = _Ema(0.3)
+        self.hold = HoldTimer()
+        self.t = 0.0
+        self.t0: float | None = None
+
+    def update(self, frame) -> dict[str, float]:
+        t_ms, hue, bright, ax, ay, az = frame
+        if self.t0 is None:
+            self.t0 = t_ms / 1000.0
+        self.t = t = t_ms / 1000.0 - self.t0
+        h, b = self.hue.update(t, hue), self.bright.update(t, bright)
+        return {
+            "hue": h,
+            "brightness": b,
+            "hold": self.hold.update(t, h, b),
+            "motion": math.sqrt(max(self.energy.update(t, ax * ax + ay * ay + az * az), 0.0)),
+        }
+
+    @property
+    def progress(self) -> float:
+        return self.t
+
+
 class LiveCoach:
-    def __init__(self, reference: Features | None, cards: list[dict], lang: str = "en"):
+    def __init__(self, reference: Features | None, cards: list[dict], lang: str = "en",
+                 kind: str = DEFAULT_KIND):
         self.ref = reference
+        self.kind = kind
+        self.strokes = KINDS[kind]["progress"] == "strokes"
         self.cards = sorted(cards, key=lambda c: c["stroke_index"])
         self.lang = lang
-        self.tracker = LiveTracker()
+        self.tracker = LiveTracker() if self.strokes else HeatTracker()
         self.shown: set[str] = set()
         self._off_since: dict[str, float] = {}
         self._last_alert: dict[str, float] = {}
@@ -121,7 +165,9 @@ class LiveCoach:
         self._still_at = -1e9
         self._moving_thr = 0.8
         self._steady = None
-        if reference is not None:
+        if reference is not None and not self.strokes:
+            self._steady = np.ones(len(reference.t), bool)
+        elif reference is not None:
             m = reference.X["motion"]
             moving = m[m > np.percentile(m, 20)]
             self._moving_thr = 0.3 * float(np.median(moving)) if len(moving) else 0.8
@@ -138,7 +184,7 @@ class LiveCoach:
 
     def ghost(self, k: float) -> dict[str, float] | None:
         i = self._ghost_index(k)
-        return None if i is None else {c: float(self.ref.X[c][i]) for c in CHANNELS}
+        return None if i is None else {c: float(self.ref.X[c][i]) for c in self.ref.channels}
 
     def update(self, frame) -> list[dict]:
         live = self.tracker.update(frame)
@@ -165,15 +211,24 @@ class LiveCoach:
         return events
 
     def _check(self, t: float, live: dict, ghost: dict) -> list[dict]:
-        # Only coach while both are actually stroking: a pause on either side isn't a deviation.
-        if self.tracker.peak < self._moving_thr * 1.5:
-            self._still_at = t
-        if (self.tracker.strokes.count < 3 or live["tempo"] == 0
-                or t - self._still_at < RESUME_GRACE_S):
+        if self.strokes:
+            # Only coach while both are actually stroking: a pause on either side isn't a deviation.
+            if self.tracker.peak < self._moving_thr * 1.5:
+                self._still_at = t
+            if (self.tracker.strokes.count < 3 or live["tempo"] == 0
+                    or t - self._still_at < RESUME_GRACE_S):
+                self._off_since.clear()
+                return []
+        elif ghost["brightness"] < HoldTimer.GLOW_MIN:
+            # The master's steel is dark (not yet in the fire, or quenched): nothing to match.
             self._off_since.clear()
             return []
         out = []
-        for c, tol in LIVE_TOL.items():
+        for c, tol in LIVE_TOL[self.kind].items():
+            # Colour read off dark steel is noise; only the glow cue applies until it lights up.
+            if c == "hue" and live["brightness"] < HoldTimer.GLOW_MIN:
+                self._off_since.pop(c, None)
+                continue
             d = live[c] - ghost[c]
             if abs(d) <= tol:
                 self._off_since.pop(c, None)

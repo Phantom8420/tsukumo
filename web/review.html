@@ -75,10 +75,12 @@
 
   let detail = await api.get(`/api/sessions/${id}`).catch((e) => { $("#title").textContent = e.message; throw e; });
   const s = detail.session;
+  const K = meta.kinds[s.kind];
+  const strokes = K.progress === "strokes";
   $("#title").innerHTML = `${esc(s.person_name)} <span class="ja">${esc(s.skill_name)}</span>`;
   $("#subtitle").textContent =
     `${s.role === "master" ? "Master session" : "Apprentice session"} · ${ago(s.created_at)} · ` +
-    `${Math.round(s.duration ?? 0)}s · ${s.strokes ?? 0} strokes`;
+    `${Math.round(s.duration ?? 0)}s` + (strokes ? ` · ${s.strokes ?? 0} strokes` : "");
 
   if (s.role === "master") masterView(); else apprenticeView();
 
@@ -88,7 +90,7 @@
     $("#master-view").classList.remove("hidden");
     let selected = null;
     const chart = new Lanes($("#m-chart"), {
-      channels: meta.channel_order, meta: meta.channels, laneHeight: 62,
+      channels: K.channel_order, meta: K.channels, laneHeight: 62,
       extra: { key: "surprise", label: "Surprise" },
       onBand: (sid) => select(sid),
     });
@@ -112,7 +114,7 @@
     function render() {
       actions();
       const f = detail.features;
-      const all = Object.fromEntries(meta.channel_order.map((c) => [c, series(f, c)]));
+      const all = Object.fromEntries(K.channel_order.map((c) => [c, series(f, c)]));
       all.surprise = { t: f.t, v: detail.surprise_score };
       chart.set({
         t0: 0, t1: f.t.at(-1), series: all,
@@ -125,7 +127,7 @@
       });
       $("#surprises").innerHTML = detail.surprises.length ? detail.surprises.map((x, i) => `
         <div class="surprise ${x.id === selected ? "selected" : ""} ${x.status}" data-id="${x.id}">
-          <div class="s-top"><b>Q${i + 1} · ${clock(x.t_start)} · stroke ${x.stroke_index}</b>
+          <div class="s-top"><b>Q${i + 1} · ${clock(x.t_start)}${strokes ? ` · stroke ${x.stroke_index}` : ""}</b>
             <span class="pill ${x.status === "answered" ? "ok" : x.status === "open" ? "warn" : ""}">${x.status}</span></div>
           <div class="s-sum">${esc(x.summary)}</div>
         </div>`).join("") : `<div class="empty">Steady session: nothing surprising to ask about.</div>`;
@@ -148,7 +150,7 @@
       const n = detail.surprises.indexOf(x) + 1;
       const box = $("#detail");
       box.classList.remove("hidden");
-      const ev = x.evidence.map((e) => `<tr><td>${e.trend ? "build-up: " : ""}${esc(meta.channels[e.channel].label)}</td>
+      const ev = x.evidence.map((e) => `<tr><td>${e.trend ? "build-up: " : ""}${esc(K.channels[e.channel].label)}</td>
         <td class="num mono">${e.before.toFixed(1)} → ${e.during.toFixed(1)} ${esc(e.unit)}</td></tr>`).join("");
       box.innerHTML = `
         <h3>Q${n}: Why did you do that here? <span class="ja">なぜここで？</span></h3>
@@ -240,21 +242,21 @@
       return;
     }
     $("#score").innerHTML = `<span class="${scoreClass(r.overall)}" style="color:var(--${scoreClass(r.overall) || "ink"})">${r.overall.toFixed(0)}</span><span class="muted" style="font-size:24px">%</span>`;
-    $("#channels").innerHTML = meta.channel_order.map((c) => `
-      <div class="chan-row"><span>${esc(meta.channels[c].label)}</span>
+    $("#channels").innerHTML = K.channel_order.map((c) => `
+      <div class="chan-row"><span>${esc(K.channels[c].label)}</span>
         <div class="meter"><i style="width:${r.channels[c]}%"></i></div>
         <span class="mono muted">${r.channels[c].toFixed(0)}</span></div>`).join("");
     $("#weak").innerHTML = r.weak_spots.length ? r.weak_spots.map((w) => `
       <div class="surprise"><div class="s-top"><b>${clock(w.t_start)}–${clock(w.t_end)}</b>
-        <span class="pill bad">${esc(meta.channels[w.channel].label)}</span></div>
+        <span class="pill bad">${esc(K.channels[w.channel].label)}</span></div>
         <div class="s-sum">${esc(w.message)}</div></div>`).join("")
       : `<div class="empty">Nothing stood out. Close to the master throughout.</div>`;
 
     const f = detail.features;
-    new Lanes($("#a-chart"), { channels: meta.channel_order, meta: meta.channels, laneHeight: 70 }).set({
+    new Lanes($("#a-chart"), { channels: K.channel_order, meta: K.channels, laneHeight: 70 }).set({
       t0: 0, t1: f.t.at(-1),
-      series: Object.fromEntries(meta.channel_order.map((c) => [c, series(f, c)])),
-      ghost: Object.fromEntries(meta.channel_order.map((c) => [c, { t: r.ghost_t, v: r.ghost[c] }])),
+      series: Object.fromEntries(K.channel_order.map((c) => [c, series(f, c)])),
+      ghost: Object.fromEntries(K.channel_order.map((c) => [c, { t: r.ghost_t, v: r.ghost[c] }])),
       bands: r.weak_spots.map((w) => ({ t0: w.t_start, t1: w.t_end, color: "rgba(226,73,47,0.14)" })),
     });
     $("#head-actions").innerHTML = `<a class="btn" href="radar.html#${s.person_id}">Skill passport</a>

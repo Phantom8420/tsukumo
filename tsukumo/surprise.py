@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
-from .config import CHANNEL_META, CHANNELS, FS, NOISE_FLOOR
+from .config import FS, KINDS, channel
 from .signals import Features, smooth
 
 BASELINE_S = 4.0
@@ -78,26 +78,28 @@ def channel_z(feat: Features) -> dict[str, np.ndarray]:
     """Per-channel z of the upcoming CURRENT_S window against the preceding BASELINE_S."""
     nb, nc = int(BASELINE_S * FS), int(CURRENT_S * FS)
     out = {}
-    for c in CHANNELS:
+    for c in feat.channels:
         x = feat.X[c]
         med, mad = _rolling_median_mad(x, nb)
         ahead = np.full(len(x), np.nan)
         if len(x) > nc:
             ahead[: len(x) - nc + 1] = sliding_window_view(x, nc).mean(axis=1)
-        scale = np.maximum(1.4826 * mad, NOISE_FLOOR[c])
+        scale = np.maximum(1.4826 * mad, channel(feat.kind, c)["floor"])
         z = (ahead - med) / scale
         out[c] = np.clip(np.nan_to_num(z, nan=0.0), -Z_CAP, Z_CAP)
     return out
 
 
 def surprise_score(z: dict[str, np.ndarray]) -> np.ndarray:
-    Z = np.abs(np.stack([z[c] for c in CHANNELS], axis=1))
+    Z = np.abs(np.stack(list(z.values()), axis=1))
     rms = np.sqrt((Z ** 2).mean(axis=1))
     return smooth(0.6 * Z.max(axis=1) + 0.4 * rms, 0.3)
 
 
 def _pauses(feat: Features, min_s: float = 0.6) -> list[tuple[int, int]]:
     """Index ranges where the tool stopped moving mid-session."""
+    if KINDS[feat.kind]["progress"] != "strokes":
+        return []   # holding still is the work itself when soaking steel, not a break from it
     still = ~_active(feat)
     edge = int(2.5 * FS)
     still[:edge] = False
@@ -113,18 +115,18 @@ def _pauses(feat: Features, min_s: float = 0.6) -> list[tuple[int, int]]:
     return runs
 
 
-def _describe(kind: str, evidence: list[Evidence], duration: float) -> str:
+def _describe(work: str, kind: str, evidence: list[Evidence], duration: float) -> str:
     parts = []
     if kind == "pause":
         parts.append(f"stopped stroking for {duration:.1f}s")
     for e in [e for e in evidence if not e.trend][:3]:
         if kind == "pause" and e.channel in ("motion", "tempo", "loudness", "tone"):
             continue
-        label = CHANNEL_META[e.channel]["label"].lower()
+        label = channel(work, e.channel)["label"].lower()
         verb = "rose" if e.delta > 0 else "dropped"
         parts.append(f"{label} {verb} {abs(e.delta):.1f}{e.unit} ({e.before:.1f}→{e.during:.1f})")
     for e in [e for e in evidence if e.trend][:1]:
-        label = CHANNEL_META[e.channel]["label"].lower()
+        label = channel(work, e.channel)["label"].lower()
         verb = "climbed" if e.delta > 0 else "fell"
         parts.append(f"beforehand, {label} {verb} {abs(e.delta):.0f}{e.unit} over {TREND_S:.0f}s")
     text = "; ".join(parts)
@@ -135,19 +137,21 @@ def _evidence(feat: Features, z: dict[str, np.ndarray], i0: int, i1: int, peak: 
     nb = int(BASELINE_S * FS)
     b0 = max(0, i0 - nb)
     ev = []
-    for c in CHANNELS:
+    for c in feat.channels:
         zc = float(z[c][peak])
         if abs(zc) < 2.0:
             continue
         before = float(np.median(feat.X[c][b0:i0])) if i0 > b0 else float(feat.X[c][i0])
         during = float(np.mean(feat.X[c][i0:max(i1, i0 + 1)]))
-        ev.append(Evidence(c, before, during, during - before, CHANNEL_META[c]["unit"], zc))
+        ev.append(Evidence(c, before, during, during - before, channel(feat.kind, c)["unit"], zc))
     ev.sort(key=lambda e: -abs(e.z))
     return ev + _trends(feat, i0)
 
 
 def _active(feat: Features) -> np.ndarray:
     m = feat.X["motion"]
+    if KINDS[feat.kind]["progress"] != "strokes":
+        return np.ones(len(m), bool)
     moving = m[m > np.percentile(m, 20)]
     return m > 0.3 * np.median(moving) if len(moving) else np.ones(len(m), bool)
 
@@ -167,13 +171,15 @@ def _trends(feat: Features, i0: int) -> list[Evidence]:
     if old_mask.sum() < FS or new_mask.sum() < FS / 2:
         return []
     out = []
-    for c in ("tone", "loudness", "angle", "tempo"):
+    # Force and soak time build up as a matter of course; a trend in them says nothing.
+    for c in [c for c in feat.channels if c not in ("motion", "hold")]:
         x = feat.X[c]
         before = float(np.median(x[old0:old1][old_mask]))
         during = float(np.median(x[new0:i0][new_mask]))
-        z = (during - before) / NOISE_FLOOR[c]
+        spec = channel(feat.kind, c)
+        z = (during - before) / spec["floor"]
         if abs(z) >= 3.0:
-            out.append(Evidence(c, before, during, during - before, CHANNEL_META[c]["unit"], z, trend=True))
+            out.append(Evidence(c, before, during, during - before, spec["unit"], z, trend=True))
     out.sort(key=lambda e: -abs(e.z))
     return out
 
@@ -231,6 +237,6 @@ def detect(feat: Features, max_events: int = MAX_EVENTS) -> tuple[list[Surprise]
             stroke_index=int(feat.strokes[i0]),
             progress=float(feat.t[i0] / max(feat.duration, 1e-6)),
             evidence=ev,
-            summary=_describe(kind, ev, dur),
+            summary=_describe(feat.kind, kind, ev, dur),
         ))
     return events, score

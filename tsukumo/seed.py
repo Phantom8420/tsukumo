@@ -30,7 +30,7 @@ SKILLS = [
     dict(id="honbazuke", name="Final edge sharpening", name_ja="本刃付け",
          description="Whetstone finishing of the edge: angle, rhythm, burr, micro-bevel."),
     dict(id="yakiire", name="Quench hardening", name_ja="焼入れ",
-         description="Heating to temperature by colour and quenching for hardness."),
+         description="Heating to temperature by colour and quenching for hardness.", kind="heat"),
     dict(id="hizukuri", name="Forge shaping", name_ja="火造り",
          description="Hammering the blank to shape at the forge."),
     dict(id="etsuke", name="Handle fitting", name_ja="柄付け",

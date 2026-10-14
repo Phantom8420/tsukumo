@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS skills (
     name TEXT NOT NULL,
     name_ja TEXT,
     description TEXT,
+    kind TEXT NOT NULL DEFAULT 'sharpen',
     reference_session_id TEXT
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -95,6 +96,10 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
         self._db.executescript(SCHEMA)
+        # Databases from before skills had a kind.
+        if "kind" not in {r[1] for r in self._db.execute("PRAGMA table_info(skills)")}:
+            self._db.execute("ALTER TABLE skills ADD COLUMN kind TEXT NOT NULL DEFAULT 'sharpen'")
+            self._db.commit()
 
     # -- plumbing -----------------------------------------------------------------
 
@@ -133,9 +138,9 @@ class Store:
 
     def upsert_skill(self, **s) -> None:
         self._exec(
-            "INSERT OR REPLACE INTO skills (id, name, name_ja, description, reference_session_id) "
-            "VALUES (:id, :name, :name_ja, :description, :reference_session_id)",
-            {"name_ja": None, "description": None, "reference_session_id": None, **s},
+            "INSERT OR REPLACE INTO skills (id, name, name_ja, description, kind, reference_session_id) "
+            "VALUES (:id, :name, :name_ja, :description, :kind, :reference_session_id)",
+            {"name_ja": None, "description": None, "kind": "sharpen", "reference_session_id": None, **s},
         )
 
     def people(self, role: str | None = None) -> list[dict]:
@@ -174,7 +179,7 @@ class Store:
 
     def session(self, session_id: str) -> dict | None:
         return self._row(
-            "SELECT s.*, p.name AS person_name, k.name AS skill_name FROM sessions s "
+            "SELECT s.*, p.name AS person_name, k.name AS skill_name, k.kind FROM sessions s "
             "JOIN people p ON p.id = s.person_id JOIN skills k ON k.id = s.skill_id WHERE s.id = ?",
             (session_id,),
         )
@@ -182,7 +187,7 @@ class Store:
     def sessions(self, skill_id: str | None = None, person_id: str | None = None,
                  role: str | None = None, status: str | None = None) -> list[dict]:
         sql = ("SELECT s.id, s.skill_id, s.person_id, s.role, s.status, s.source, s.created_at, "
-               "s.duration, s.strokes, s.score, p.name AS person_name, k.name AS skill_name "
+               "s.duration, s.strokes, s.score, p.name AS person_name, k.name AS skill_name, k.kind "
                "FROM sessions s JOIN people p ON p.id = s.person_id JOIN skills k ON k.id = s.skill_id")
         where, args = [], []
         for col, val in (("s.skill_id", skill_id), ("s.person_id", person_id), ("s.role", role), ("s.status", status)):

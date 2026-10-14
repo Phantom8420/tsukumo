@@ -1,4 +1,4 @@
-"""Raw phone frames -> the five channels everything else reasons about.
+"""Raw phone frames -> the channels everything else reasons about, per kind of work.
 
 The same StrokeCounter and smoothing constants are used offline (whole
 session) and live (frame by frame), so a stroke means the same thing in the
@@ -12,17 +12,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import CHANNELS, FS
+from .config import DEFAULT_KIND, FS, KINDS, channels
 
 
-def resample(raw: np.ndarray, fs: float = FS) -> tuple[np.ndarray, np.ndarray]:
-    """Resample (N, 7) raw frames onto a uniform grid.
+def resample(raw: np.ndarray, fs: float = FS, width: int = 7) -> tuple[np.ndarray, np.ndarray]:
+    """Resample (N, width) raw frames onto a uniform grid.
 
-    Returns seconds-from-start and an (M, 6) array of angle, ax, ay, az, loud, tone.
+    Returns seconds-from-start and an (M, width - 1) array of everything after t.
     """
     raw = np.asarray(raw, dtype=float)
-    if raw.ndim != 2 or raw.shape[1] != 7:
-        raise ValueError(f"expected (N, 7) frames, got {raw.shape}")
+    if raw.ndim != 2 or raw.shape[1] != width:
+        raise ValueError(f"expected (N, {width}) frames, got {raw.shape}")
     raw = raw[np.argsort(raw[:, 0], kind="stable")]
     t = raw[:, 0] / 1000.0
     keep = np.concatenate([[True], np.diff(t) > 0])
@@ -30,7 +30,7 @@ def resample(raw: np.ndarray, fs: float = FS) -> tuple[np.ndarray, np.ndarray]:
     if len(t) < 2:
         raise ValueError("need at least two frames")
     grid = np.arange(t[0], t[-1], 1.0 / fs)
-    cols = [np.interp(grid, t, raw[:, i]) for i in range(1, 7)]
+    cols = [np.interp(grid, t, raw[:, i]) for i in range(1, width)]
     return grid - grid[0], np.stack(cols, axis=1)
 
 
@@ -120,20 +120,49 @@ def tempo_series(stroke_times: np.ndarray, t: np.ndarray, idle_s: float = 2.0) -
     return smooth(out, 1.0)
 
 
+class HoldTimer:
+    """Seconds the steel's colour has held steady: how long it has been soaking at heat.
+
+    Resets whenever hue or glow moves out of a small band, and stays at zero
+    while the steel isn't glowing at all.
+    """
+
+    HUE_BAND = 3.0
+    GLOW_BAND = 5.0
+    GLOW_MIN = 20.0
+
+    def __init__(self):
+        self.anchor: tuple[float, float, float] | None = None
+
+    def update(self, t: float, hue: float, bright: float) -> float:
+        if bright < self.GLOW_MIN:
+            self.anchor = None
+            return 0.0
+        a = self.anchor
+        if a is None or abs(hue - a[1]) > self.HUE_BAND or abs(bright - a[2]) > self.GLOW_BAND:
+            self.anchor = a = (t, hue, bright)
+        return t - a[0]
+
+
 @dataclass
 class Features:
     t: np.ndarray                 # seconds from start, uniform at FS
     X: dict[str, np.ndarray]      # channel -> values, same length as t
-    stroke_times: np.ndarray      # seconds at which each stroke completed
-    strokes: np.ndarray           # cumulative stroke count at each sample
+    stroke_times: np.ndarray      # seconds at which each unit of progress completed
+    strokes: np.ndarray           # cumulative progress at each sample (strokes, or whole seconds)
     side: np.ndarray | None = None  # +1/-1: which face of the blade is down
+    kind: str = DEFAULT_KIND
 
     @property
     def duration(self) -> float:
         return float(self.t[-1]) if len(self.t) else 0.0
 
-    def matrix(self, channels=CHANNELS) -> np.ndarray:
-        return np.stack([self.X[c] for c in channels], axis=1)
+    @property
+    def channels(self) -> tuple[str, ...]:
+        return channels(self.kind)
+
+    def matrix(self) -> np.ndarray:
+        return np.stack([self.X[c] for c in self.channels], axis=1)
 
     def index_at(self, seconds: float) -> int:
         return int(np.clip(round(seconds * FS), 0, len(self.t) - 1))
@@ -156,8 +185,10 @@ class Features:
         }
 
 
-def extract(raw: np.ndarray) -> Features:
-    t, V = resample(raw)
+def extract(raw: np.ndarray, kind: str = DEFAULT_KIND) -> Features:
+    t, V = resample(raw, width=len(KINDS[kind]["raw"]))
+    if kind == "heat":
+        return _extract_heat(t, V)
     accel = V[:, 1:4]
 
     counter = StrokeCounter()
@@ -176,3 +207,17 @@ def extract(raw: np.ndarray) -> Features:
         "tone": smooth(V[:, 5], 0.5),
     }
     return Features(t=t, X=X, stroke_times=stroke_times, strokes=strokes, side=np.sign(signed))
+
+
+def _extract_heat(t: np.ndarray, V: np.ndarray) -> Features:
+    hue, bright, accel = smooth(V[:, 0], 0.5), smooth(V[:, 1], 0.5), V[:, 2:5]
+    timer = HoldTimer()
+    X = {
+        "hue": hue,
+        "brightness": bright,
+        "hold": np.array([timer.update(*x) for x in zip(t, hue, bright)]),
+        "motion": np.sqrt(smooth((accel ** 2).sum(axis=1), 0.6)),
+    }
+    # The clock is the progress measure here: card k fires k seconds in.
+    return Features(t=t, X=X, stroke_times=np.arange(1.0, np.floor(t[-1]) + 1),
+                    strokes=np.floor(t).astype(int), kind="heat")

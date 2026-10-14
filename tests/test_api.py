@@ -34,7 +34,8 @@ def client(seeded, tmp_path, monkeypatch):
 def test_reference_data(client):
     assert {p["id"] for p in client.get("/api/people").json()} >= {"tanaka", "nguyen"}
     info = client.get("/api/info").json()
-    assert info["channel_order"] == list(config.CHANNELS)
+    assert info["kinds"]["sharpen"]["channel_order"] == list(config.KINDS["sharpen"]["channels"])
+    assert {s["id"]: s["kind"] for s in client.get("/api/skills").json()}["yakiire"] == "heat"
     assert client.get("/api/qr", params={"data": "https://x"}).text.startswith("<?xml")
 
 

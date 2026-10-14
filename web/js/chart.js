@@ -2,6 +2,7 @@
 
 const RANGE = {
   angle: [0, 40], motion: [0, 6], tempo: [0, 150], loudness: [-60, -15], tone: [0, 4500], surprise: [0, 10],
+  hue: [0, 60], brightness: [0, 100], hold: [0, 30],
 };
 const GUTTER = 128;
 const AXIS = 22;

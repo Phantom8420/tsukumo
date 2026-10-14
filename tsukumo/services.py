@@ -36,7 +36,8 @@ class Tsukumo:
 
     def features(self, session_id: str) -> Features:
         if session_id not in self._features:
-            self._features[session_id] = extract(self.store.load_frames(session_id))
+            kind = self._session(session_id)["kind"]
+            self._features[session_id] = extract(self.store.load_frames(session_id), kind)
         return self._features[session_id]
 
     def create_session(self, skill_id: str, person_id: str, source: str = "phone",
@@ -148,12 +149,14 @@ class Tsukumo:
 
     # -- live -------------------------------------------------------------------------
 
-    def coach_for(self, session_id: str) -> LiveCoach | None:
+    def coach_for(self, session_id: str) -> LiveCoach:
+        """The apprentice's coach; masters get one with no ghost, which only tracks."""
         s = self._session(session_id)
         if s["role"] != "apprentice":
-            return None
+            return LiveCoach(None, [], "ja", s["kind"])
         person = self.store.person(s["person_id"])
-        return LiveCoach(self._reference(s["skill_id"]), self.store.cards(skill_id=s["skill_id"]), person["lang"])
+        return LiveCoach(self._reference(s["skill_id"]), self.store.cards(skill_id=s["skill_id"]),
+                         person["lang"], s["kind"])
 
     # -- people-level views -----------------------------------------------------------
 

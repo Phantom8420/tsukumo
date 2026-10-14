@@ -17,10 +17,18 @@ from fastapi import WebSocket
 from starlette.concurrency import run_in_threadpool
 
 from .coach import LiveCoach
+from .config import KINDS
 from .services import Tsukumo
 from .simulate import generate
 
 log = logging.getLogger(__name__)
+
+
+def _simulated(session: dict, profile: str, seed: int | None) -> np.ndarray:
+    if session["kind"] != "sharpen":
+        raise ValueError(f"no simulator for {session['kind']} work yet")
+    frames, _ = generate(profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
+    return frames
 
 
 class LiveSession:
@@ -47,7 +55,7 @@ class Hub:
             raise LookupError(f"session {session_id}")
         if s["status"] != "live":
             raise ValueError("session already finished")
-        coach = self.service.coach_for(session_id) or LiveCoach(None, [], "ja")
+        coach = self.service.coach_for(session_id)
         ls = self.live[session_id] = LiveSession(s, coach)
         return ls
 
@@ -70,8 +78,9 @@ class Hub:
         if ls is None or ls.ending:
             return
         out: list[dict] = []
+        width = len(KINDS[ls.session["kind"]]["raw"])
         for f in frames:
-            if len(f) != 7:
+            if len(f) != width:
                 continue
             try:
                 frame = tuple(float(v) for v in f)
@@ -120,7 +129,7 @@ class Hub:
         ls = self.open(session_id)
         if ls.device or ls.sim_task:
             raise ValueError("a device is already streaming into this session")
-        frames, _ = generate(profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
+        frames = _simulated(ls.session, profile, seed)
         ls.sim_task = asyncio.create_task(self._play(session_id, frames, speed))
 
     def replay(self, session_id: str, profile: str, seed: int | None = None) -> dict:
@@ -133,8 +142,8 @@ class Hub:
             raise LookupError(f"session {session_id}")
         if s["status"] != "live" or session_id in self.live:
             raise ValueError("session is already recording or finished")
-        coach = self.service.coach_for(session_id) or LiveCoach(None, [], "ja")
-        frames, _ = generate(profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
+        coach = self.service.coach_for(session_id)
+        frames = _simulated(s, profile, seed)
         events: list[dict] = []
         for frame in frames.tolist():
             for e in coach.update(tuple(frame)):

@@ -68,7 +68,8 @@ sessions are per instance and vanish on the next cold start.
 
 ```
 tsukumo/
-  signals.py    raw frames -> angle, force, tempo, loudness, pitch; stroke counter
+  config.py     kinds of work: each skill's frame layout and channels
+  signals.py    raw frames -> channels (sharpening: angle, force, tempo, sound; heat: colour, glow, soak time)
   surprise.py   change/pause detection with explanations and build-up evidence
   align.py      banded DTW + per-channel scoring + weak spots
   coach.py      online tracker and live coach (buzzes, cards, ghost ticks)

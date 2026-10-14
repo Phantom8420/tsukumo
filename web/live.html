@@ -69,7 +69,7 @@
 
       <div class="panel">
         <div class="row" style="justify-content:space-between;align-items:flex-end">
-          <div class="stat"><b id="strokes">0</b><span>strokes</span></div>
+          <div class="stat"><b id="strokes">0</b><span id="progress-unit">strokes</span></div>
           <div class="stat" id="match-box"><b id="match">–</b><span>live match to master</span></div>
           <div class="stat"><b id="clock">0:00</b><span>elapsed</span></div>
         </div>
@@ -118,11 +118,13 @@
   $("#person").onchange = $("#skill").onchange = updateNote;
   updateNote();
 
-  let session, person, ws, chart, rolling, credit = { sum: 0, n: 0 };
+  let session, person, K, ws, chart, rolling, credit = { sum: 0, n: 0 };
 
   $("#start").onclick = async () => {
     session = await api.post("/api/sessions", { skill_id: $("#skill").value, person_id: $("#person").value });
     person = personOf(session.person_id);
+    K = meta.kinds[session.kind];
+    $("#progress-unit").textContent = K.progress;
     $("#setup").classList.add("hidden");
     $("#live").classList.remove("hidden");
     $("#title").innerHTML = `${esc(person.name)} <span class="ja">${esc(session.skill_name)}</span>`;
@@ -138,8 +140,8 @@
     $("#phone-url").textContent = url;
     $("#phone-url").href = url;
 
-    chart = new Lanes($("#chart"), { channels: meta.channel_order, meta: meta.channels, laneHeight: 64, live: true });
-    rolling = { live: new Rolling(meta.channel_order), ghost: new Rolling(meta.channel_order) };
+    chart = new Lanes($("#chart"), { channels: K.channel_order, meta: K.channels, laneHeight: 64, live: true });
+    rolling = { live: new Rolling(K.channel_order), ghost: new Rolling(K.channel_order) };
     chart.set({ t0: 0, t1: 25 });
     if (meta.realtime) ws = socket(`/ws/watch/${session.id}`, onEvent);
     else $("#connect .qr-box").innerHTML = `<span class="muted" style="font-size:14px">This hosted demo can't hold a live link to a phone.
@@ -190,10 +192,12 @@
       chart.set({ ...rolling.live.window(e.t), series: rolling.live.data, ghost: person.role === "master" ? {} : rolling.ghost.data });
       $("#strokes").textContent = Math.floor(e.k);
       $("#clock").textContent = clock(e.t);
-      if (e.ghost && e.live.tempo > 0 && e.ghost.motion > 0.8) {
+      // Only count moments where the master was mid-work: stroking, or steel glowing.
+      const working = e.ghost && (K.progress === "strokes" ? e.live.tempo > 0 && e.ghost.motion > 0.8 : e.ghost.brightness >= 20);
+      if (working) {
         let c = 0, wsum = 0;
-        for (const [ch, w] of Object.entries({ angle: .35, motion: .15, tempo: .2, loudness: .15, tone: .15 })) {
-          const d = (e.live[ch] - e.ghost[ch]) / meta.tolerance[ch];
+        for (const [ch, w] of Object.entries(K.weights)) {
+          const d = (e.live[ch] - e.ghost[ch]) / K.tolerance[ch];
           c += w * Math.exp(-Math.LN2 * d * d);
           wsum += w;
         }
@@ -229,7 +233,7 @@
     const box = $("#result");
     box.classList.remove("hidden");
     if (e.role === "master") {
-      box.innerHTML = `<h3>Recorded ${e.strokes} strokes in ${clock(e.duration)}</h3>
+      box.innerHTML = `<h3>Recorded ${K.progress === "strokes" ? `${e.strokes} strokes in ` : ""}${clock(e.duration)}</h3>
         <p class="muted">${e.surprises} moment${e.surprises === 1 ? "" : "s"} worth asking the master about.</p>
         <a class="btn primary" href="review.html?s=${e.session_id}">Review with the master</a>`;
     } else {

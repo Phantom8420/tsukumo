@@ -93,3 +93,30 @@ def test_live_ticks_carry_ghost(master):
     ticks = [e for e in _run(LiveCoach(feat, [], "en"), "skilled", 4) if e["type"] == "tick"]
     assert len(ticks) > 500
     assert ticks[-1]["ghost"] is not None and ticks[-1]["k"] > 100
+
+
+def _heat(peak_hue=30.0, hold_s=20.0, fs=30.0):
+    """Hand-rolled heat run: glow rises for 20s, soaks at peak_hue, then quenches to dark."""
+    t = np.arange(0, 20 + hold_s + 10, 1 / fs)
+    ramp = np.clip(t / 20, 0, 1)
+    lit = t < 20 + hold_s
+    bright = np.where(lit, 80 * ramp, 0.0)
+    hue = np.where(lit, peak_hue * ramp, 0.0)
+    a = np.zeros((len(t), 3))
+    return np.column_stack([t * 1000, hue, bright, a])
+
+
+def test_heat_tracks_soak_time_and_scores_by_colour():
+    master = extract(_heat(), "heat")
+    assert master.channels == ("hue", "brightness", "hold", "motion")
+    assert master.X["hold"].max() == pytest.approx(20, abs=1)
+    assert align.score(master, extract(_heat(), "heat")).overall > 95
+    assert align.score(master, extract(_heat(peak_hue=45, hold_s=8), "heat")).overall < 75
+    with pytest.raises(ValueError):
+        align.score(master, extract(generate("master", seed=0)[0]))
+
+
+def test_heat_coach_says_too_hot():
+    coach = LiveCoach(extract(_heat(), "heat"), [], "en", "heat")
+    buzzes = [e for f in _heat(peak_hue=45) for e in coach.update(f) if e["type"] == "buzz"]
+    assert buzzes and buzzes[0]["channel"] == "hue" and buzzes[0]["direction"] == 1

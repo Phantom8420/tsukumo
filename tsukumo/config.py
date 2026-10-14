@@ -13,28 +13,49 @@ CERT_DIR = ROOT / "certs"
 # Uniform analysis rate. Phones deliver 30-60 Hz; everything is resampled to this.
 FS = 30.0
 
-# Raw frame layout sent by the phone (and the simulator):
-#   t_ms, angle_deg, ax, ay, az (linear accel, m/s^2), loud_dbfs, tone_hz
-RAW_FIELDS = ("t", "angle", "ax", "ay", "az", "loud", "tone")
-
-# Derived channels, in display order.
-CHANNELS = ("angle", "motion", "tempo", "loudness", "tone")
-
-CHANNEL_META = {
-    "angle": {"label": "Blade angle", "ja": "刃の角度", "unit": "°"},
-    "motion": {"label": "Stroke force", "ja": "力加減", "unit": "m/s²"},
-    "tempo": {"label": "Tempo", "ja": "リズム", "unit": "spm"},
-    "loudness": {"label": "Stone sound", "ja": "砥石の音", "unit": "dB"},
-    "tone": {"label": "Sound pitch", "ja": "音の高さ", "unit": "Hz"},
+# Each skill is measured as one kind of work. A kind fixes the raw frame the
+# phone sends and the channels everything downstream reasons about.
+#   tol    - how far off counts as "half credit" when scoring, in native units
+#   weight - share of the overall score
+#   floor  - smallest spread trusted when z-scoring, so a perfectly steady
+#            master doesn't turn sensor noise into "surprises"
+# progress is what lines an apprentice up with the master: completed strokes
+# for rhythmic work, elapsed seconds where the clock itself is the skill.
+KINDS = {
+    "sharpen": {
+        # t_ms, angle_deg, ax, ay, az (linear accel, m/s^2), loud_dbfs, tone_hz
+        "raw": ("t", "angle", "ax", "ay", "az", "loud", "tone"),
+        "progress": "strokes",
+        "channels": {
+            "angle": {"label": "Blade angle", "ja": "刃の角度", "unit": "°", "tol": 3.0, "weight": 0.35, "floor": 0.6},
+            "motion": {"label": "Stroke force", "ja": "力加減", "unit": "m/s²", "tol": 1.5, "weight": 0.15, "floor": 0.35},
+            "tempo": {"label": "Tempo", "ja": "リズム", "unit": "spm", "tol": 20.0, "weight": 0.2, "floor": 6.0},
+            "loudness": {"label": "Stone sound", "ja": "砥石の音", "unit": "dB", "tol": 6.0, "weight": 0.15, "floor": 1.5},
+            "tone": {"label": "Sound pitch", "ja": "音の高さ", "unit": "Hz", "tol": 400.0, "weight": 0.15, "floor": 90.0},
+        },
+    },
+    "heat": {
+        # t_ms, hue_deg (0 red .. 60 yellow), brightness (0-100), ax, ay, az (hand)
+        "raw": ("t", "hue", "bright", "ax", "ay", "az"),
+        "progress": "seconds",
+        "channels": {
+            "hue": {"label": "Steel colour", "ja": "鋼の色", "unit": "°", "tol": 4.0, "weight": 0.35, "floor": 1.0},
+            "brightness": {"label": "Glow", "ja": "明るさ", "unit": "%", "tol": 8.0, "weight": 0.25, "floor": 2.0},
+            "hold": {"label": "Soak time", "ja": "保持時間", "unit": "s", "tol": 4.0, "weight": 0.25, "floor": 1.0},
+            "motion": {"label": "Hand movement", "ja": "手の動き", "unit": "m/s²", "tol": 1.5, "weight": 0.15, "floor": 0.35},
+        },
+    },
 }
+DEFAULT_KIND = "sharpen"
 
-# How far off counts as "half credit" when scoring an apprentice, in native units.
-TOLERANCE = {"angle": 3.0, "motion": 1.5, "tempo": 20.0, "loudness": 6.0, "tone": 400.0}
-SCORE_WEIGHTS = {"angle": 0.35, "motion": 0.15, "tempo": 0.2, "loudness": 0.15, "tone": 0.15}
 
-# Smallest spread we trust when z-scoring a channel, so a perfectly steady
-# master doesn't turn sensor noise into "surprises".
-NOISE_FLOOR = {"angle": 0.6, "motion": 0.35, "tempo": 6.0, "loudness": 1.5, "tone": 90.0}
+def channels(kind: str) -> tuple[str, ...]:
+    return tuple(KINDS[kind]["channels"])
+
+
+def channel(kind: str, name: str) -> dict:
+    return KINDS[kind]["channels"][name]
+
 
 # Card languages. Apprentices see their own; masters review in Japanese.
 LANGS = ("ja", "en", "vi", "id")

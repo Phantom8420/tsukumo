@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from .config import CHANNEL_META, CHANNELS, FS, SCORE_WEIGHTS, TOLERANCE
+from .config import FS, channel
 from .signals import Features
 
 ALIGN_FS = 5.0
@@ -23,9 +23,12 @@ def _downsample(M: np.ndarray, factor: int) -> np.ndarray:
     return M[:n].reshape(-1, factor, M.shape[1]).mean(axis=1)
 
 
+def _spec(feat: Features, key: str) -> np.ndarray:
+    return np.array([channel(feat.kind, c)[key] for c in feat.channels])
+
+
 def normalise(feat: Features, center: np.ndarray) -> np.ndarray:
-    tol = np.array([TOLERANCE[c] for c in CHANNELS])
-    return (feat.matrix() - center) / tol
+    return (feat.matrix() - center) / _spec(feat, "tol")
 
 
 def dtw(A: np.ndarray, B: np.ndarray, band: float = 0.3) -> tuple[list[tuple[int, int]], float]:
@@ -81,8 +84,8 @@ class ScoreReport:
         }
 
 
-def _advice(channel: str, signed_diff: float) -> str:
-    unit = CHANNEL_META[channel]["unit"]
+def _advice(kind: str, name: str, signed_diff: float) -> str:
+    unit = channel(kind, name)["unit"]
     amount = f"{abs(signed_diff):.1f}{unit}"
     high = signed_diff > 0
     return {
@@ -93,10 +96,16 @@ def _advice(channel: str, signed_diff: float) -> str:
                     f"{'too much pressure or a drying stone' if high else 'too little contact'}",
         "tone": f"Stone pitch {amount} {'higher' if high else 'lower'} - "
                 f"{'the stone may be drying out' if high else 'check contact'}",
-    }[channel]
+        "hue": f"Steel colour {amount} {'yellower - running hot' if high else 'redder - not yet at heat'}",
+        "brightness": f"Glow {amount} {'brighter' if high else 'dimmer'} than the master",
+        "hold": f"{'Held' if high else 'Soaked'} {amount} {'longer' if high else 'shorter'} at heat than the master",
+    }[name]
 
 
 def score(master: Features, apprentice: Features) -> ScoreReport:
+    if master.kind != apprentice.kind:
+        raise ValueError(f"can't score {apprentice.kind} work against a {master.kind} reference")
+    chans = master.channels
     factor = int(FS / ALIGN_FS)
     center = np.median(master.matrix(), axis=0)
     M = _downsample(normalise(master, center), factor)
@@ -107,31 +116,31 @@ def score(master: Features, apprentice: Features) -> ScoreReport:
 
     diff = A[ia] - M[im]                                  # in tolerance units
     credit = np.exp(-np.log(2) * diff ** 2)               # 1 at perfect, 0.5 at one tolerance
-    channels = {c: float(100 * credit[:, k].mean()) for k, c in enumerate(CHANNELS)}
-    overall = sum(SCORE_WEIGHTS[c] * channels[c] for c in CHANNELS)
+    channels = {c: float(100 * credit[:, k].mean()) for k, c in enumerate(chans)}
+    overall = float(_spec(master, "weight") @ [channels[c] for c in chans])
 
     # Per apprentice sample: the master sample it was matched to (last match wins).
     match = np.zeros(len(A), dtype=int)
     match[ia] = im
-    weak = _weak_spots(credit, diff, ia)
+    weak = _weak_spots(master, credit, diff, ia)
 
-    tol = np.array([TOLERANCE[c] for c in CHANNELS])
-    ghost_native = M[match] * tol + center
+    ghost_native = M[match] * _spec(master, "tol") + center
     return ScoreReport(
         overall=overall,
         channels=channels,
         weak_spots=weak,
-        ghost={c: np.round(ghost_native[:, k], 2).tolist() for k, c in enumerate(CHANNELS)},
+        ghost={c: np.round(ghost_native[:, k], 2).tolist() for k, c in enumerate(chans)},
         ghost_t=np.round(np.arange(len(A)) / ALIGN_FS, 2).tolist(),
     )
 
 
-def _weak_spots(credit: np.ndarray, diff: np.ndarray, ia: np.ndarray, top: int = 3,
+def _weak_spots(master: Features, credit: np.ndarray, diff: np.ndarray, ia: np.ndarray, top: int = 3,
                 window_s: float = 4.0) -> list[WeakSpot]:
     """The worst few windows, each tied to the channel that cost the most there."""
+    chans = master.channels
     n = int(ia.max()) + 1
-    per_sample = np.ones((n, len(CHANNELS)))
-    signed = np.zeros((n, len(CHANNELS)))
+    per_sample = np.ones((n, len(chans)))
+    signed = np.zeros((n, len(chans)))
     np.minimum.at(per_sample, ia, credit)
     signed[ia] = diff
 
@@ -139,9 +148,8 @@ def _weak_spots(credit: np.ndarray, diff: np.ndarray, ia: np.ndarray, top: int =
     if n < w:
         return []
     kernel = np.ones(w) / w
-    rolling = np.stack([np.convolve(per_sample[:, k], kernel, mode="valid") for k in range(len(CHANNELS))], 1)
-    weights = np.array([SCORE_WEIGHTS[c] for c in CHANNELS])
-    badness = ((1 - rolling) * weights).sum(axis=1)
+    rolling = np.stack([np.convolve(per_sample[:, k], kernel, mode="valid") for k in range(len(chans))], 1)
+    badness = ((1 - rolling) * _spec(master, "weight")).sum(axis=1)
 
     spots: list[WeakSpot] = []
     taken = np.zeros(len(badness), dtype=bool)
@@ -155,10 +163,10 @@ def _weak_spots(credit: np.ndarray, diff: np.ndarray, ia: np.ndarray, top: int =
         order = [k for k in np.argsort(rolling[start]) if rolling[start, k] <= 0.6]
         if not order:
             continue
-        k = next((k for k in order if CHANNELS[k] not in used), order[0])
-        c = CHANNELS[k]
-        sd = float(np.mean(signed[start:start + w, k]) * TOLERANCE[c])
+        k = next((k for k in order if chans[k] not in used), order[0])
+        c = chans[k]
+        sd = float(np.mean(signed[start:start + w, k]) * channel(master.kind, c)["tol"])
         spots.append(WeakSpot(c, start / ALIGN_FS, (start + w) / ALIGN_FS,
-                              100 * float(rolling[start, k]), _advice(c, sd)))
+                              100 * float(rolling[start, k]), _advice(master.kind, c, sd)))
         taken[max(0, start - w): start + w] = True
     return sorted(spots, key=lambda s: s.t_start)
