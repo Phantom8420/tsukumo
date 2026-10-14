@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSUKUMO · Workshop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500&family=Shippori+Mincho:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div>
+      <h1>The master retires.<br>The tool remembers.</h1>
+      <p>A phone clipped to the master's tool records how they really work. TSUKUMO finds the moments
+        that no manual explains, asks the master why, and turns each answer into a card that coaches
+        apprentices in their own language, at the right stroke, while they work.</p>
+      <div class="row" style="margin-top:18px">
+        <a class="btn primary" href="live.html">Start a session</a>
+        <a class="btn" href="radar.html">See succession risk</a>
+      </div>
+    </div>
+    <div class="steps">
+      <div class="step"><b>1</b><div><strong>Capture</strong>The master works normally. Angle, rhythm, force and the stone's sound are recorded from the tool.</div></div>
+      <div class="step"><b>2</b><div><strong>Ask only about surprises</strong>Moments where the master broke from steady work are flagged. A few questions, after the shift.</div></div>
+      <div class="step"><b>3</b><div><strong>Coach</strong>Apprentices race the master's ghost. The phone buzzes on drift and the master's tips appear at the same point in the work.</div></div>
+      <div class="step"><b>4</b><div><strong>Certify &amp; plan</strong>Measured skill passports and a radar of which skills retire with whom.</div></div>
+    </div>
+  </section>
+
+  <section class="grid cols-3" id="stats" style="margin-bottom:18px"></section>
+
+  <section class="grid side">
+    <div class="panel">
+      <div class="panel-head"><h2>Sessions <span class="ja">稽古の記録</span></h2></div>
+      <table>
+        <thead><tr><th>Who</th><th>Skill</th><th>When</th><th class="num">Strokes</th><th class="num">Result</th></tr></thead>
+        <tbody id="sessions"></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Kotsu library <span class="ja">コツ</span></h2></div>
+      <div class="grid" id="cards"></div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+  import { api } from "./js/api.js";
+  import { header, esc, ago, scoreClass, cardHTML, wireCardLangs, $ } from "./js/ui.js";
+
+  header();
+
+  const [sessions, cards, radar, people] = await Promise.all([
+    api.get("/api/sessions"), api.get("/api/cards"), api.get("/api/radar"), api.get("/api/people"),
+  ]);
+
+  const critical = radar.filter((r) => r.status === "critical").length;
+  const masters = people.filter((p) => p.role === "master");
+  const soonest = Math.min(...masters.map((m) => m.retire_year || 9999));
+  $("#stats").innerHTML = `
+    <div class="panel stat"><b>${critical} / ${radar.length}</b><span>skills with no one ready to take over</span></div>
+    <div class="panel stat"><b>${cards.length}</b><span>kotsu cards captured from ${new Set(cards.map((c) => c.master_id)).size} of ${masters.length} masters</span></div>
+    <div class="panel stat"><b>${soonest < 9999 ? soonest : "–"}</b><span>next master retirement</span></div>`;
+
+  const rows = sessions.filter((s) => s.status === "done");
+  $("#sessions").innerHTML = rows.length ? rows.map((s) => `
+    <tr class="link" data-id="${s.id}">
+      <td>${esc(s.person_name)} <span class="pill">${s.role}</span></td>
+      <td>${esc(s.skill_name)}</td>
+      <td class="muted">${ago(s.created_at)}</td>
+      <td class="num">${s.strokes ?? "–"}</td>
+      <td class="num">${s.role === "master" ? '<span class="pill">review</span>'
+        : s.score != null ? `<span class="pill ${scoreClass(s.score)}">${s.score.toFixed(0)}</span>` : "–"}</td>
+    </tr>`).join("") : `<tr><td colspan="5" class="empty">No sessions yet.</td></tr>`;
+  $("#sessions").addEventListener("click", (e) => {
+    const tr = e.target.closest("tr[data-id]");
+    if (tr) location.href = `review.html?s=${tr.dataset.id}`;
+  });
+
+  const byId = Object.fromEntries(cards.map((c) => [c.id, c]));
+  $("#cards").innerHTML = cards.length ? cards.map((c) => cardHTML(c, "en")).join("")
+    : `<div class="empty">No cards yet. Review a master session to create one.</div>`;
+  wireCardLangs($("#cards"), byId);
+</script>
+</body>
+</html>
