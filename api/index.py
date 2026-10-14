@@ -13,20 +13,24 @@ from tsukumo.app import create_app  # noqa: E402
 from tsukumo.seed import seed  # noqa: E402
 from tsukumo.services import Tsukumo  # noqa: E402
 from tsukumo.store import Store  # noqa: E402
+from urllib.parse import parse_qsl, urlencode  # noqa: E402
 
 _store = Store(config.DB_PATH, config.FRAMES_DIR)
 seed(Tsukumo(_store))
 _store.close()
 
-app = create_app()
+_app = create_app()
 
 
-@app.middleware("http")
-async def _debug_path(request, call_next):
-    # temporary: find out what path Vercel hands the function
-    resp = await call_next(request)
-    if resp.status_code == 404:
-        from fastapi.responses import JSONResponse
-        return JSONResponse({"detail": "Not Found", "path": request.url.path, "root": request.scope.get("root_path"),
-                             "raw": request.scope.get("raw_path", b"").decode()}, status_code=404)
-    return resp
+async def app(scope, receive, send):
+    """Vercel hands the function the rewrite target (/api/index) as its path; vercel.json
+    passes the real one along as ?__path=, which is put back before FastAPI routes it."""
+    if scope["type"] == "http":
+        query = parse_qsl(scope["query_string"].decode(), keep_blank_values=True)
+        path = next((v for k, v in query if k == "__path"), None)
+        if path is not None:
+            path = "/" + path.lstrip("/")
+            rest = urlencode([(k, v) for k, v in query if k != "__path"])
+            scope = {**scope, "path": path, "raw_path": path.encode(), "query_string": rest.encode()}
+    await _app(scope, receive, send)
+
