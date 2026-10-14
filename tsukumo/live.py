@@ -123,6 +123,26 @@ class Hub:
         frames, _ = generate(profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
         ls.sim_task = asyncio.create_task(self._play(session_id, frames, speed))
 
+    def replay(self, session_id: str, profile: str, seed: int | None = None) -> dict:
+        """Run a simulated session start to finish in one call; the client plays the events back.
+
+        For hosts without WebSockets (serverless), where the streaming path can't work.
+        """
+        s = self.service.store.session(session_id)
+        if not s:
+            raise LookupError(f"session {session_id}")
+        if s["status"] != "live" or session_id in self.live:
+            raise ValueError("session is already recording or finished")
+        coach = self.service.coach_for(session_id) or LiveCoach(None, [], "ja")
+        frames, _ = generate(profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
+        events: list[dict] = []
+        for frame in frames.tolist():
+            for e in coach.update(tuple(frame)):
+                if e["type"] == "card" and s["role"] == "apprentice":
+                    self.service.store.log_card_view(e["card"]["id"], s["person_id"], session_id)
+                events.append(e)
+        return {"events": events, "summary": {"type": "summary", **self.service.finalize(session_id, frames)}}
+
     async def _play(self, session_id: str, frames: np.ndarray, speed: float) -> None:
         ls = self.live[session_id]
         await self.device_status(ls, True, "simulator")

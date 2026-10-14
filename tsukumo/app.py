@@ -94,6 +94,8 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
             "tolerance": config.TOLERANCE,
             "langs": config.LANG_NAMES,
             "profiles": list(PROFILES),
+            # Serverless hosts can't hold WebSockets: no phone, and the simulator replays over HTTP.
+            "realtime": not os.environ.get("VERCEL"),
             "certify": {"score": config.CERTIFY_SCORE, "sessions": config.CERTIFY_SESSIONS},
             "ai": "offline" if config.OFFLINE or not (os.environ.get("ANTHROPIC_API_KEY")
                                                        or os.environ.get("ANTHROPIC_AUTH_TOKEN")) else "claude",
@@ -150,6 +152,15 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
         except LookupError as exc:
             raise NotFound(str(exc))
         return {"ok": True}
+
+    @app.post("/api/sessions/{session_id}/replay")
+    def replay(session_id: str, body: Simulate):
+        if body.profile not in PROFILES:
+            raise ValueError(f"unknown profile {body.profile}")
+        try:
+            return hub.replay(session_id, body.profile, body.seed)
+        except LookupError as exc:
+            raise NotFound(str(exc))
 
     @app.post("/api/sessions/{session_id}/end")
     async def end_session(session_id: str):

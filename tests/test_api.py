@@ -83,6 +83,17 @@ def test_live_apprentice_session_over_websocket(client):
     assert passport["skills"][0]["sessions"] == 4
 
 
+def test_replay_runs_a_whole_session_over_http(client):
+    s = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "nguyen"}).json()
+    r = client.post(f"/api/sessions/{s['id']}/replay", json={"profile": "novice", "seed": 3}).json()
+    kinds = {e["type"] for e in r["events"]}
+    assert {"tick", "buzz", "card"} <= kinds
+    assert [e["t"] for e in r["events"]] == sorted(e["t"] for e in r["events"])
+    assert r["summary"]["report"]["overall"] < 75
+    assert client.get(f"/api/sessions/{s['id']}").json()["session"]["status"] == "done"
+    assert client.post(f"/api/sessions/{s['id']}/replay", json={}).status_code == 400
+
+
 def test_short_recording_is_discarded(client):
     ses = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
     with client.websocket_connect(f"/ws/device/{ses['id']}") as dev:
