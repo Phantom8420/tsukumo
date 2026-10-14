@@ -63,6 +63,8 @@
   $("#toggle-slot").innerHTML = themeSwitch();
   wireThemeSwitches($("#toggle"));
 
+  // A cold serverless start seeds the demo first, so this can take a few seconds.
+  $("#lead").innerHTML = `<p class="muted">Opening the workshop…</p>`;
   const [sessions, cards, radar, people] = await Promise.all([
     api.get("/api/sessions"), api.get("/api/cards"), api.get("/api/radar"), api.get("/api/people"),
   ]).catch((e) => {
