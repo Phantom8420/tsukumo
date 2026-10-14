@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0f0e0d">
+  <title>TSUKUMO · Tool</title>
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    html, body { height: 100%; overflow: hidden; }
+    body { display: flex; flex-direction: column; padding: max(16px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom)); gap: 14px; transition: background .15s; }
+    body.cue { background: #3a1510; }
+    .who { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+    .who b { font-family: var(--serif); font-size: 18px; }
+    .stage { flex: 1; display: grid; place-items: center; text-align: center; align-content: center; gap: 12px; }
+    .angle { font-family: var(--serif); font-size: 112px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .angle small { font-size: 40px; color: var(--muted); }
+    .level { width: 70vw; height: 10px; border-radius: 99px; background: var(--panel-2); overflow: hidden; }
+    .level i { display: block; height: 100%; width: 0; background: var(--gold); transition: width .1s; }
+    .cue-text { font-family: var(--serif); font-size: 30px; min-height: 1.4em; color: var(--ink); padding: 0 6px; }
+    .step-title { font-family: var(--serif); font-size: 24px; }
+    .actions { display: grid; gap: 10px; }
+    .actions .btn { padding: 18px; font-size: 18px; border-radius: 12px; }
+    .overlay { position: fixed; inset: 0; background: rgba(15,14,13,.97); padding: 24px 20px; display: flex; flex-direction: column; gap: 16px; justify-content: center; z-index: 5; }
+    .overlay .kcard { font-size: 17px; }
+    .overlay .k-title { font-size: 26px; }
+    .overlay .kcard dl { grid-template-columns: 56px 1fr; font-size: 17px; }
+    select { font-size: 16px; }
+  </style>
+</head>
+<body>
+  <div class="who">
+    <div><b id="who">TSUKUMO</b><div class="muted" id="what" style="font-size:13px">connecting…</div></div>
+    <span class="status-dot" id="dot"></span>
+  </div>
+
+  <div class="stage" id="stage">
+    <div id="pick" class="hidden" style="width:100%">
+      <div class="step-title" style="margin-bottom:12px">Choose a session</div>
+      <div class="grid" id="sessions"></div>
+    </div>
+    <div id="intro" class="hidden">
+      <div class="step-title">Strap this phone to the tool</div>
+      <p class="muted">Screen up, firmly attached. Sensors and microphone are needed to read angle, rhythm and the stone's sound.</p>
+    </div>
+    <div id="calib" class="hidden">
+      <div class="step-title">Lay the blade flat on the stone</div>
+      <p class="muted">Hold still, then tap Calibrate. Angles are measured from here.</p>
+    </div>
+    <div id="run" class="hidden" style="display:grid;gap:14px;justify-items:center">
+      <div class="angle"><span id="angle">0</span><small>°</small></div>
+      <div class="level"><i id="level"></i></div>
+      <div class="muted" id="hint" style="font-size:13px">stone sound</div>
+      <div class="cue-text" id="cue"></div>
+    </div>
+    <div id="done" class="hidden"></div>
+  </div>
+
+  <div class="actions">
+    <button class="btn primary hidden" id="enable">Enable sensors</button>
+    <button class="btn primary hidden" id="calibrate">Calibrate</button>
+    <button class="btn primary hidden" id="go">Start</button>
+    <button class="btn hidden" id="finish">Finish session</button>
+    <label class="row hidden" id="voice-row" style="justify-content:center;font-size:14px;color:var(--muted)">
+      <input type="checkbox" id="voice" checked> read cards aloud</label>
+  </div>
+
+  <div class="overlay hidden" id="overlay"></div>
+
+<script type="module">
+  import { api, socket } from "./js/api.js";
+  import { esc, $, cardHTML } from "./js/ui.js";
+
+  const SPEECH = { ja: "ja-JP", en: "en-US", vi: "vi-VN", id: "id-ID" };
+  const HZ = 50, SEND_MS = 100;
+  const show = (...ids) => ["pick", "intro", "calib", "run", "done", "enable", "calibrate", "go", "finish", "voice-row"]
+    .forEach((id) => $(`#${id}`).classList.toggle("hidden", !ids.includes(id)));
+
+  let sessionId = new URLSearchParams(location.search).get("s");
+  let ws, lang = "en", role = "apprentice";
+  const sensor = { up: null, lin: [0, 0, 0], grav: null, gotMotion: false };
+  let up0 = null, side0 = null, audio = null, t0 = 0, buffer = [], timer = null, sender = null, wakeLock = null;
+
+  if (!sessionId) {
+    const live = await api.get("/api/sessions?status=live");
+    show("pick");
+    $("#what").textContent = "no session in the link";
+    $("#sessions").innerHTML = live.length ? live.map((s) =>
+      `<button class="btn" data-id="${s.id}">${esc(s.person_name)} · ${esc(s.skill_name)}</button>`).join("")
+      : `<p class="muted">Start a session on the big screen, then scan its QR code.</p>`;
+    $("#sessions").onclick = (e) => {
+      const b = e.target.closest("button[data-id]");
+      if (b) location.search = `?s=${b.dataset.id}`;
+    };
+  } else {
+    connect();
+  }
+
+  function connect() {
+    ws = socket(`/ws/device/${sessionId}`, onMessage, {
+      onClose: () => { $("#dot").classList.remove("on"); if (timer) $("#what").textContent = "connection lost, reconnecting…"; if (timer) setTimeout(connect, 1500); },
+    });
+  }
+
+  function onMessage(m) {
+    if (m.type === "ready") {
+      lang = m.lang;
+      role = m.session.role;
+      $("#dot").classList.add("on");
+      $("#who").textContent = m.session.person_name;
+      $("#what").textContent = `${m.session.skill_name} · ${role}`;
+      if (!timer) { show("intro", "enable"); }
+    } else if (m.type === "buzz") {
+      cue(m);
+    } else if (m.type === "card") {
+      card(m.card);
+    } else if (m.type === "summary") {
+      stop();
+      show("done");
+      $("#done").innerHTML = role === "master"
+        ? `<div class="step-title">Recorded ${m.strokes} strokes</div><p class="muted">${m.surprises} moments to review with the master on the big screen.</p>`
+        : m.report ? `<div class="muted">Match to master</div><div class="angle">${m.report.overall.toFixed(0)}<small>%</small></div>
+          ${m.report.weak_spots.slice(0, 2).map((w) => `<p class="muted">${esc(w.message)}</p>`).join("")}`
+        : `<div class="step-title">Recorded</div>`;
+    } else if (m.type === "error") {
+      $("#what").textContent = m.message;
+      if (!timer) show();
+    }
+  }
+
+  // -- sensors --------------------------------------------------------------------
+
+  $("#enable").onclick = async () => {
+    try {
+      for (const E of [window.DeviceOrientationEvent, window.DeviceMotionEvent]) {
+        if (E && typeof E.requestPermission === "function" && (await E.requestPermission()) !== "granted") {
+          throw new Error("motion permission denied");
+        }
+      }
+      window.addEventListener("deviceorientation", onOrientation);
+      window.addEventListener("devicemotion", onMotion);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      });
+      const ctx = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.3;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      audio = { ctx, analyser, time: new Float32Array(analyser.fftSize), freq: new Float32Array(analyser.frequencyBinCount) };
+      wakeLock = await navigator.wakeLock?.request("screen").catch(() => null);
+      show("calib", "calibrate");
+    } catch (e) {
+      $("#what").textContent = `${e.message}. Open over https and allow motion + microphone.`;
+    }
+  };
+
+  function onOrientation(e) {
+    if (e.beta == null) return;
+    const b = e.beta * Math.PI / 180, g = e.gamma * Math.PI / 180;
+    // Device-frame "up" from the fused orientation: steadier than raw gravity while stroking.
+    sensor.up = [-Math.cos(b) * Math.sin(g), Math.sin(b), Math.cos(b) * Math.cos(g)];
+  }
+
+  function onMotion(e) {
+    sensor.gotMotion = true;
+    if (e.acceleration && e.acceleration.x != null) {
+      sensor.lin = [e.acceleration.x, e.acceleration.y, e.acceleration.z];
+      return;
+    }
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x == null) return;
+    const raw = [a.x, a.y, a.z];
+    sensor.grav = sensor.grav ? sensor.grav.map((v, i) => v + 0.1 * (raw[i] - v)) : raw;
+    sensor.lin = raw.map((v, i) => v - sensor.grav[i]);
+  }
+
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+  function angle() {
+    if (!sensor.up || !up0) return 0;
+    const c = Math.max(-1, Math.min(1, dot(sensor.up, up0)));
+    const deg = Math.acos(c) * 180 / Math.PI;
+    const perp = sensor.up.map((v, i) => v - c * up0[i]);
+    if (!side0 && deg > 6) side0 = perp.map((v) => v / Math.hypot(...perp));
+    return side0 && dot(perp, side0) < 0 ? -deg : deg;
+  }
+
+  function sound() {
+    if (!audio) return [-90, 0];
+    const { analyser, time, freq, ctx } = audio;
+    analyser.getFloatTimeDomainData(time);
+    let s = 0;
+    for (const v of time) s += v * v;
+    const db = 10 * Math.log10(s / time.length + 1e-12);
+    analyser.getFloatFrequencyData(freq);
+    const binHz = ctx.sampleRate / analyser.fftSize;
+    let num = 0, den = 0;
+    for (let i = Math.floor(150 / binHz); i < Math.min(freq.length, 8000 / binHz); i++) {
+      const m = Math.pow(10, freq[i] / 20);
+      num += m * i * binHz;
+      den += m;
+    }
+    return [db, den > 0 ? num / den : 0];
+  }
+
+  $("#calibrate").onclick = () => {
+    if (!sensor.up) { $("#what").textContent = "no orientation data yet: move the phone slightly and retry"; return; }
+    up0 = [...sensor.up];
+    side0 = null;
+    show("calib", "go");
+    $("#calib").innerHTML = `<div class="step-title">Calibrated</div><p class="muted">Tap Start, then work normally.</p>`;
+  };
+
+  $("#go").onclick = () => {
+    show("run", "finish", "voice-row");
+    t0 = performance.now();
+    timer = setInterval(sample, 1000 / HZ);
+    sender = setInterval(flush, SEND_MS);
+  };
+
+  function sample() {
+    const [loud, tone] = sound();
+    const a = angle();
+    buffer.push([performance.now() - t0, a, ...sensor.lin, loud, tone]);
+    $("#angle").textContent = Math.abs(a).toFixed(0);
+    $("#level").style.width = `${Math.max(0, Math.min(100, (loud + 70) * 2))}%`;
+  }
+
+  function flush() {
+    if (!buffer.length || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: "frames", frames: buffer }));
+    buffer = [];
+  }
+
+  function stop() {
+    clearInterval(timer);
+    clearInterval(sender);
+    timer = sender = null;
+    wakeLock?.release?.();
+  }
+
+  $("#finish").onclick = () => {
+    flush();
+    ws.send(JSON.stringify({ type: "end" }));
+    $("#finish").disabled = true;
+    $("#cue").textContent = "analysing…";
+  };
+
+  // -- feedback -------------------------------------------------------------------
+
+  function beep(freq = 660, ms = 120) {
+    if (!audio) return;
+    const o = audio.ctx.createOscillator(), g = audio.ctx.createGain();
+    o.frequency.value = freq;
+    g.gain.value = 0.08;
+    o.connect(g).connect(audio.ctx.destination);
+    o.start();
+    o.stop(audio.ctx.currentTime + ms / 1000);
+  }
+
+  let cueTimer;
+  function cue(m) {
+    navigator.vibrate?.(m.pattern);
+    beep(m.channel === "angle" ? 740 : m.channel === "tempo" ? 520 : 620);
+    document.body.classList.add("cue");
+    $("#cue").textContent = m.message;
+    clearTimeout(cueTimer);
+    cueTimer = setTimeout(() => { document.body.classList.remove("cue"); $("#cue").textContent = ""; }, 2200);
+  }
+
+  function card(c) {
+    navigator.vibrate?.([30, 60, 30, 60, 200]);
+    const o = $("#overlay");
+    o.innerHTML = cardHTML(c, lang, { showLangs: false, sub: lang === "ja" ? null : "ja" }) +
+      `<button class="btn primary" style="padding:16px;font-size:18px">Got it</button>`;
+    o.classList.remove("hidden");
+    o.querySelector("button").onclick = () => o.classList.add("hidden");
+    setTimeout(() => o.classList.add("hidden"), 9000);
+    if ($("#voice").checked && window.speechSynthesis) {
+      const text = c.content[lang] || c.content.en;
+      const u = new SpeechSynthesisUtterance(`${text.title}. ${text.action}`);
+      u.lang = SPEECH[lang] || "en-US";
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    }
+  }
+</script>
+</body>
+</html>
