@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TSUKUMO · Workshop</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500&family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
+  <script>try{if(localStorage.getItem("tsukumo-theme")==="light")document.documentElement.dataset.theme="light"}catch(e){}</script>
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    .bento {
+      grid-template-areas:
+        "lead lead gauge faces"
+        "lead lead gauge toggle"
+        "pipe pipe trend day"
+        "ticket chips trend day";
+    }
+    @media (max-width: 1100px) {
+      .bento { grid-template-areas: "lead lead" "gauge faces" "gauge toggle" "pipe pipe" "trend day" "ticket chips"; }
+    }
+    @media (max-width: 640px) {
+      .bento { grid-template-areas: "lead" "gauge" "faces" "toggle" "pipe" "trend" "day" "ticket" "chips"; }
+    }
+    #lead { grid-area: lead; } #gauge { grid-area: gauge; } #faces { grid-area: faces; } #toggle { grid-area: toggle; }
+    #pipe { grid-area: pipe; } #trend { grid-area: trend; } #day { grid-area: day; }
+    #ticket { grid-area: ticket; } #chips { grid-area: chips; }
+    .library { margin-top: 18px; }
+  </style>
+</head>
+<body>
+<main>
+  <section class="bento" aria-label="Workshop overview">
+    <div class="tile f-ai lead-tile" id="lead"></div>
+    <a class="tile" id="gauge"></a>
+    <div class="tile" id="faces"></div>
+    <div class="tile f-moegi toggle-tile" id="toggle">
+      <div class="row">
+        <h2>Day board<span class="ja">昼</span></h2>
+        <span id="toggle-slot"></span>
+      </div>
+      <p class="sub" style="margin:0">Light, high-contrast theme for a bright workshop. Off is sumi ink.</p>
+    </div>
+    <div class="tile" id="pipe"></div>
+    <div class="tile" id="trend"></div>
+    <div class="tile" id="day"></div>
+    <a class="tile f-kaki ticket" id="ticket" href="radar.html"></a>
+    <a class="tile" id="chips" href="#library"></a>
+  </section>
+
+  <section class="panel library" id="library">
+    <div class="panel-head"><h2>Kotsu library <span class="ja">コツ</span></h2>
+      <span class="muted" style="font-size:14px">Each card fires on the apprentice's phone at the stroke where the master's habit happened.</span></div>
+    <div class="grid cols-2" id="cards"></div>
+  </section>
+</main>
+
+<script type="module">
+  import { api } from "./js/api.js";
+  import { header, esc, initials, cardHTML, wireCardLangs, themeSwitch, wireThemeSwitches, $ } from "./js/ui.js";
+
+  header();
+  $("#toggle-slot").innerHTML = themeSwitch();
+  wireThemeSwitches($("#toggle"));
+
+  const [sessions, cards, radar, people] = await Promise.all([
+    api.get("/api/sessions"), api.get("/api/cards"), api.get("/api/radar"), api.get("/api/people"),
+  ]);
+  const done = sessions.filter((s) => s.status === "done").sort((a, b) => a.created_at - b.created_at);
+  const scored = done.filter((s) => s.role === "apprentice" && s.score != null);
+  const masters = people.filter((p) => p.role === "master");
+  const apprentices = people.filter((p) => p.role === "apprentice");
+  const count = (st) => radar.filter((r) => r.status === st).length;
+  const unguarded = count("critical");
+
+  // Lead
+  $("#lead").innerHTML = `
+    <div class="top">
+      <span class="where">Seki knife workshop, demo data</span>
+      <div class="chips"><span class="chip">${masters.length} masters retiring</span><span class="chip">${radar.length} skills</span></div>
+    </div>
+    <h1>${cards.length} kotsu captured.<br><span>${unguarded} skill${unguarded === 1 ? "" : "s"} still unguarded.</span></h1>`;
+
+  // Gauge: latest apprentice match
+  const last = scored.at(-1);
+  const g = last ? last.score : 0;
+  const arc = (frac) => {
+    const a = Math.PI * (1 - frac), r = 100;
+    return `M 20 120 A ${r} ${r} 0 0 1 ${120 + r * Math.cos(a)} ${120 - r * Math.sin(a)}`;
+  };
+  $("#gauge").href = last ? `review.html?s=${last.id}` : "live.html";
+  $("#gauge").innerHTML = `
+    <h2>Match to master</h2>
+    <p class="sub">${last ? `${esc(last.person_name)}, ${esc(last.skill_name).toLowerCase()}` : "No scored sessions yet"}</p>
+    <div class="gauge">
+      <svg viewBox="0 0 240 132" aria-hidden="true">
+        <path d="${arc(1)}" fill="none" stroke="var(--panel-2)" stroke-width="20" stroke-linecap="round"/>
+        ${g > 0 ? `<path d="${arc(Math.min(g, 100) / 100)}" fill="none" stroke="var(--moegi)" stroke-width="20" stroke-linecap="round"/>` : ""}
+      </svg>
+      <b>${last ? Math.round(g) : "–"}</b>
+    </div>`;
+
+  // People
+  $("#faces").innerHTML = `
+    <h2>Workshop</h2>
+    <p class="sub">${masters.length} masters, ${apprentices.length} apprentices</p>
+    <div class="faces">
+      ${people.map((p) => `<span class="avatar" title="${esc(p.name)}">${esc(initials(p.name))}</span>`).join("")}
+      <span class="more">+${apprentices.length}</span>
+    </div>`;
+
+  // Succession pipeline
+  const seg = [
+    ["critical", "No successor", "var(--kaki)", "var(--kaki-ink)"],
+    ["at_risk", "At risk", "var(--fuji)", "var(--fuji-ink)"],
+    ["covered", "Handed over", "var(--matcha)", "var(--matcha-ink)"],
+  ].map(([st, label, bg, fg]) => ({ n: count(st), label, bg, fg }));
+  $("#pipe").innerHTML = `
+    <div class="tile-head"><h2>Succession pipeline</h2><span class="sub">${radar.length} skills</span></div>
+    <div class="pipe">
+      <div class="pipe-bar">${seg.filter((s) => s.n).map((s) =>
+        `<div style="flex:${s.n};background:${s.bg};color:${s.fg}">${s.n}</div>`).join("")}</div>
+      <div class="pipe-legend">${seg.filter((s) => s.n).map((s) =>
+        `<div style="flex:${s.n};--dot:${s.bg}"><b>${Math.round((100 * s.n) / radar.length)}%</b><span>${s.label}</span></div>`).join("")}</div>
+    </div>`;
+
+  // Trend of apprentice scores
+  const first = scored[0];
+  const diff = last && first ? last.score - first.score : 0;
+  $("#trend").innerHTML = `
+    <h2>Apprentice match</h2>
+    <p class="sub">Every scored session, oldest first</p>
+    <div class="bignum">${last ? Math.round(last.score) : "–"}<small>%</small></div>
+    ${scored.length > 1 ? `<div class="delta">${diff >= 0 ? "↑" : "↓"} ${Math.abs(diff).toFixed(0)} points since the first session</div>` : ""}
+    <svg class="trend" id="trend-svg" aria-label="Apprentice scores over time"></svg>`;
+  function drawTrend() {
+    const svg = $("#trend-svg");
+    const w = svg.clientWidth, h = svg.clientHeight;
+    if (!w || scored.length < 2) return;
+    const pad = 12;
+    const pts = scored.map((s, i) => [pad + (i / (scored.length - 1)) * (w - 2 * pad), h - pad - (s.score / 100) * (h - 2 * pad)]);
+    // Smooth with a Catmull-Rom spline.
+    let d = `M ${pts[0][0]} ${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [p0, p1, p2, p3] = [pts[i - 1] || pts[i], pts[i], pts[i + 1], pts[i + 2] || pts[i + 1]];
+      d += ` C ${p1[0] + (p2[0] - p0[0]) / 6} ${p1[1] + (p2[1] - p0[1]) / 6}, ${p2[0] - (p3[0] - p1[0]) / 6} ${p2[1] - (p3[1] - p1[1]) / 6}, ${p2[0]} ${p2[1]}`;
+    }
+    const [lx, ly] = pts.at(-1);
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.innerHTML = `
+      <path d="${d} L ${lx} ${h} L ${pts[0][0]} ${h} Z" fill="var(--fuji)" opacity="0.55"/>
+      <path d="${d}" fill="none" stroke="var(--ink)" stroke-width="2.2"/>
+      <line x1="${lx}" x2="${lx}" y1="${ly}" y2="${h}" stroke="var(--ink)" stroke-width="1" opacity="0.25"/>
+      <circle cx="${lx}" cy="${ly}" r="11" fill="var(--ink)" opacity="0.15"/>
+      <circle cx="${lx}" cy="${ly}" r="5.5" fill="var(--ink)"/>`;
+  }
+  drawTrend();
+  new ResizeObserver(drawTrend).observe($("#trend-svg"));
+
+  // Recent sessions as a day list
+  const fmtDate = (ts) => new Date(ts * 1000).toLocaleDateString("en", { month: "short", day: "numeric" });
+  const recent = done.slice(-5).reverse();
+  $("#day").innerHTML = `
+    <div class="tile-head"><h2>Recent sessions</h2><span class="sub">${new Date().toLocaleDateString("en", { weekday: "short", month: "short", day: "numeric" })}</span></div>
+    <div class="day">${recent.length ? recent.map((s) => {
+      const kind = s.role === "master" ? "master" : s.score >= 75 ? "pass" : "learn";
+      const what = s.role === "master" ? "Master recording, review" : `Match ${Math.round(s.score)}%`;
+      return `<a class="slot ${kind}" href="review.html?s=${s.id}"><time>${fmtDate(s.created_at)}</time>
+        <div>${esc(s.person_name)}<small>${what}</small></div></a>`;
+    }).join("") : `<p class="sub">No sessions yet. Record one from Record &amp; train.</p>`}</div>`;
+
+  // Next retirement ticket
+  const next = [...masters].sort((a, b) => (a.retire_year || 9999) - (b.retire_year || 9999))[0];
+  const held = radar.filter((r) => r.masters.some((m) => m.id === next?.id));
+  const nextCards = cards.filter((c) => c.master_id === next?.id).length;
+  $("#ticket").innerHTML = next ? `
+    <span class="where">Next retirement</span>
+    <div>
+      <div class="name">${esc(next.name)}</div>
+      <p class="sub" style="margin:6px 0 0">${esc(next.bio || "")}</p>
+      <div class="stub"><b>${next.retire_year || "–"}</b>
+        <span>${held.length} skill${held.length === 1 ? "" : "s"} held<br>${nextCards} kotsu captured</span></div>
+    </div>` : `<span class="where">No masters yet</span>`;
+
+  // Kotsu chips
+  const titles = cards.map((c) => (c.content.en || {}).title).filter(Boolean);
+  const shown = titles.slice(0, 6);
+  const dots = ["var(--kaki)", "var(--fuji)", "var(--matcha)", "var(--ai)"];
+  $("#chips").innerHTML = `
+    <h2>Kotsu coverage</h2>
+    <p class="sub">${cards.length} card${cards.length === 1 ? "" : "s"}, each in Japanese, English, Vietnamese and Indonesian</p>
+    <div class="chips chip-cloud">
+      ${["JA", "EN", "VI", "ID"].map((l) => `<span class="chip solid">${l}</span>`).join("")}
+      ${shown.map((t, i) => `<span class="chip" style="--dot:${dots[i % 4]}"><i></i>${esc(t)}</span>`).join("")}
+      ${titles.length > shown.length ? `<span class="chip">+${titles.length - shown.length}</span>` : ""}
+    </div>`;
+
+  // Library
+  const byId = Object.fromEntries(cards.map((c) => [c.id, c]));
+  $("#cards").innerHTML = cards.length ? cards.map((c) => cardHTML(c, "en")).join("")
+    : `<div class="empty">No cards yet. Review a master session to create one.</div>`;
+  wireCardLangs($("#cards"), byId);
+</script>
+</body>
+</html>
