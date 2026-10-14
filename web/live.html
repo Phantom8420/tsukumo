@@ -141,17 +141,41 @@
     chart = new Lanes($("#chart"), { channels: meta.channel_order, meta: meta.channels, laneHeight: 64, live: true });
     rolling = { live: new Rolling(meta.channel_order), ghost: new Rolling(meta.channel_order) };
     chart.set({ t0: 0, t1: 25 });
-    ws = socket(`/ws/watch/${session.id}`, onEvent);
+    if (meta.realtime) ws = socket(`/ws/watch/${session.id}`, onEvent);
+    else $("#connect .qr-box").innerHTML = `<span class="muted" style="font-size:14px">This hosted demo can't hold a live link to a phone.
+      Simulate plays a full session; run TSUKUMO locally to record from a real tool.</span>`;
   };
+
+  // Hosted (no WebSockets): the server runs the whole session at once and we play its events back in time.
+  let replay;
+  async function playReplay() {
+    replay = { stop() {} };  // blocks a second click while the request runs
+    let events, summary;
+    try {
+      ({ events, summary } = await api.post(`/api/sessions/${session.id}/replay`, { profile: $("#profile").value }));
+    } catch (e) { replay = null; throw e; }
+    const speed = +$("#speed").value, start = performance.now();
+    let i = 0;
+    const finish = () => { replay = null; onEvent({ type: "analysing" }); onEvent(summary); };
+    replay = { stop() { i = events.length; } };
+    onEvent({ type: "device", connected: true, source: "simulator" });
+    (function step() {
+      const t = ((performance.now() - start) / 1000) * speed;
+      while (i < events.length && events[i].t <= t) onEvent(events[i++]);
+      if (i < events.length) requestAnimationFrame(step); else finish();
+    })();
+  }
 
   $("#simulate").onclick = async () => {
     try {
+      if (!meta.realtime) { if (!replay) await playReplay(); return; }
       await api.post(`/api/sessions/${session.id}/simulate`, { profile: $("#profile").value, speed: +$("#speed").value });
     } catch (e) { toast(esc(e.message), "buzz"); }
   };
 
   $("#end").onclick = async () => {
     if (!session) return;
+    if (replay) return replay.stop();
     try { await api.post(`/api/sessions/${session.id}/end`); } catch (e) { toast(esc(e.message)); }
   };
 
