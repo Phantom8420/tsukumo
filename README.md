@@ -60,6 +60,24 @@ counting those frames let a novice reach 80.
 
 One-link version: `live.html?person=nguyen&skill=yakiire&sim=novice&speed=4`.
 
+**From the camera.** On a quench session the phone page reads colour instead of the hand: tap the
+steel on the preview, and it takes hue and glow from the brightest coloured pixels in that box
+(a white wall or a grey bench reads as 0, not as glow). Exposure and white balance are locked
+after 1.5 s where the browser allows it, because auto exposure would "correct" the very colour
+being measured; the page says whether the lock took. Checked on clips rendered from the simulator:
+a filmed master scored **98** against itself and the filmed novice **70**; the master's glow rise
+and its check (glow down 29 %, colour down 7°) were found as questions. The turn was not, because
+those clips have no hand in them, and movement comes from a visible hand.
+
+Limits, measured: every camera and codec sees colour its own way (the same red decoded 10° apart
+after a VP9 round-trip), so absolute hue means nothing across devices. Hence the rule below.
+
+**Record the way the master did.** An apprentice is only compared with a master recorded the same
+way: filmed with filmed, strapped phone with strapped phone. Otherwise one side measures the hand's
+tilt and the other the blade's angle, or two cameras' colour. The phone page stops with a message
+when they differ. The seeded masters wore the phone, so practise against them with the phone or the
+simulator; to train by camera, film a master on the same rig and set it as the reference.
+
 ## Does it find the right moments?
 
 `python -m tsukumo eval` plants the master's habits at known times in 20 simulated sessions, then

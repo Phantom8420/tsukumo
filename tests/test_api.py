@@ -160,6 +160,25 @@ def test_device_reports_camera_source(client):
         assert client.get(f"/api/sessions/{ses['id']}").json()["session"]["source"] == "camera"
 
 
+def test_apprentice_must_record_the_way_the_master_did(client):
+    # The seeded honbazuke master wore the strapped phone; a filmed apprentice measures different things.
+    ses = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
+    with client.websocket_connect(f"/ws/device/{ses['id']}") as dev:
+        dev.receive_json()
+        dev.send_json({"type": "frames", "source": "camera", "frames": [[0, 15, 0, 0, 0, -30, 1800]]})
+        msg = dev.receive_json()
+        while msg["type"] != "error":
+            msg = dev.receive_json()
+        assert msg["fatal"] and "strapped" in msg["message"]
+
+    ok = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
+    with client.websocket_connect(f"/ws/device/{ok['id']}") as dev:
+        dev.receive_json()
+        dev.send_json({"type": "frames", "source": "phone", "frames": [[0, 15, 0, 0, 0, -30, 1800]]})
+        dev.send_json({"type": "frames", "source": "phone", "frames": [[100, 15, 0, 0, 0, -30, 1800]]})
+    assert client.get(f"/api/sessions/{ok['id']}").json()["session"]["source"] == "phone"
+
+
 def test_demo_records_are_protected_and_a_key_unlocks_them(client, monkeypatch):
     seeded = next(c for c in client.get("/api/cards", params={"skill_id": "honbazuke"}).json() if c["source"] == "seed")
     assert client.delete(f"/api/cards/{seeded['id']}").status_code == 403

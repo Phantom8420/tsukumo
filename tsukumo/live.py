@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .coach import LiveCoach
 from .config import KINDS
-from .services import Tsukumo
+from .services import Tsukumo, by_camera
 from .simulate import generate, generate_heat
 
 log = logging.getLogger(__name__)
@@ -27,10 +27,14 @@ log = logging.getLogger(__name__)
 SIMULATORS = {"sharpen": generate, "heat": generate_heat}
 
 
-def _simulated(service: Tsukumo, session: dict, profile: str, seed: int | None) -> np.ndarray:
+def _reference(service: Tsukumo, session: dict) -> dict | None:
     skill = service.store.skill(session["skill_id"])
-    ref = skill and skill["reference_session_id"] and service.store.session(skill["reference_session_id"])
-    if ref and ref["source"].startswith("video:"):
+    return skill and skill["reference_session_id"] and service.store.session(skill["reference_session_id"])
+
+
+def _simulated(service: Tsukumo, session: dict, profile: str, seed: int | None) -> np.ndarray:
+    ref = _reference(service, session)
+    if ref and by_camera(ref["source"]):
         # The simulator imitates a strapped phone; a camera-measured ghost is on another scale.
         raise ValueError("this master was recorded on camera; train against it with the camera, not the simulator")
     frames, _ = SIMULATORS[session["kind"]](profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
@@ -46,6 +50,8 @@ class LiveSession:
         self.device: WebSocket | None = None
         self.ending = False
         self.sim_task: asyncio.Task | None = None
+        self.capture: str | None = None      # what the device said it records with
+        self.refused = False
 
 
 class Hub:
@@ -83,10 +89,23 @@ class Hub:
         ls = self.live.get(session_id)
         if ls is None or ls.ending:
             return
-        if source in ("camera", "video") and ls.session["source"] == "phone":
-            # Camera scores carry more noise; certification needs to know which this was.
-            self.service.store.set_source(session_id, source)
-            ls.session["source"] = source
+        if source and ls.capture is None:
+            ls.capture = source
+            if source in ("camera", "video") and ls.session["source"] == "phone":
+                # Camera scores carry more noise; certification needs to know which this was.
+                self.service.store.set_source(session_id, source)
+                ls.session["source"] = source
+            ref = _reference(self.service, ls.session)
+            # A hand's tilt is not a blade's angle, and every camera sees colour its own way:
+            # an apprentice is only comparable with a master recorded the same way.
+            if ls.session["role"] == "apprentice" and ref and by_camera(ref["source"]) != by_camera(source):
+                ls.refused = True
+                how = "filmed" if by_camera(ref["source"]) else "with the phone strapped to the tool"
+                if ls.device:
+                    await self.send(ls.device, {"type": "error", "fatal": True,
+                                                "message": f"This master was recorded {how}; record the same way to compare."})
+        if ls.refused:
+            return
         out: list[dict] = []
         width = len(KINDS[ls.session["kind"]]["raw"])
         for f in frames:

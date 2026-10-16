@@ -86,7 +86,7 @@
 <script type="module">
   import { api, socket } from "./js/api.js";
   import { esc, $, cardHTML } from "./js/ui.js";
-  import { trackHands, audioMeter } from "./js/vision.js";
+  import { trackHands, trackGlow, lockExposure, audioMeter } from "./js/vision.js";
 
   const SPEECH = { ja: "ja-JP", en: "en-US", vi: "vi-VN", id: "id-ID" };
   const HZ = 50, SEND_MS = 100;
@@ -95,7 +95,8 @@
 
   const params = new URLSearchParams(location.search);
   let sessionId = params.get("s");
-  let stopVision = null, captureSource = "phone";
+  let stopVision = null, captureSource = "phone", kind = "sharpen";
+  let spot = { x: 0.5, y: 0.5 };   // where the steel is in the picture; tap the preview to move it
   let ws, lang = "en", role = "apprentice";
   const sensor = { up: null, lin: [0, 0, 0], grav: null, gotMotion: false };
   let up0 = null, side0 = null, audio = null, t0 = 0, buffer = [], timer = null, sender = null, wakeLock = null;
@@ -125,6 +126,7 @@
     if (m.type === "ready") {
       lang = m.lang;
       role = m.session.role;
+      kind = m.session.kind;
       $("#dot").classList.add("on");
       $("#who").textContent = m.session.person_name;
       $("#what").textContent = `${m.session.skill_name} · ${role}`;
@@ -132,6 +134,7 @@
         // ?video= runs a clip straight through, so footage can be processed unattended.
         if (params.get("video")) startVision(params.get("video"));
         else show("intro");
+        $("#src-sensors").classList.toggle("hidden", kind === "heat");
       }
     } else if (m.type === "buzz") {
       cue(m);
@@ -148,7 +151,7 @@
     } else if (m.type === "error") {
       $("#what").textContent = m.message;
       // Analysis failed after Finish: stop here rather than reconnect and hide the error.
-      if ($("#finish").disabled) { stop(); $("#cue").textContent = m.message; }
+      if ($("#finish").disabled || m.fatal) { stop(); $("#cue").textContent = m.message; }
       else if (!timer) show();
     }
   }
@@ -163,10 +166,10 @@
   async function startVision(src) {
     captureSource = src ? "video" : "camera";
     const video = $("#video");
-    $("#what").textContent = "loading the hand tracker…";
+    $("#what").textContent = kind === "heat" ? "loading the camera…" : "loading the hand tracker…";
     try {
       const ctx = new AudioContext();
-      let meter;
+      let meter, locked = false;
       if (src) {
         video.src = src;
         video.muted = false;
@@ -179,6 +182,11 @@
           audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         });
         video.srcObject = stream;
+        if (kind === "heat") {
+          // Let the camera settle on the forge, then hold exposure and white balance still.
+          await new Promise((ok) => setTimeout(ok, 1500));
+          locked = await lockExposure(stream.getVideoTracks()[0]);
+        }
         meter = audioMeter(ctx, ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks())));
       }
       audio = { ctx };
@@ -188,23 +196,41 @@
       const canvas = $("#hands"), g = canvas.getContext("2d");
       canvas.width = video.videoWidth; canvas.height = video.videoHeight;
       const dotColour = getComputedStyle(document.documentElement).getPropertyValue("--moegi").trim();
-      stopVision = await trackHands(video, meter, (f) => {
-        buffer.push(f);
-        $("#angle").textContent = f[1].toFixed(0);
-        $("#level").style.width = `${Math.max(0, Math.min(100, (f[5] + 70) * 2))}%`;
-      }, {
-        onHand: (lm) => {
-          g.clearRect(0, 0, canvas.width, canvas.height);
-          if (!lm) return;
-          g.fillStyle = dotColour;
-          for (const p of lm) { g.beginPath(); g.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 7); g.fill(); }
-        },
-      });
+      const onHand = (lm) => {
+        g.clearRect(0, 0, canvas.width, canvas.height);
+        if (kind === "heat") {
+          // The box the colour is read from.
+          g.strokeStyle = dotColour;
+          g.lineWidth = Math.max(2, canvas.width / 300);
+          g.strokeRect((spot.x - 0.15) * canvas.width, (spot.y - 0.15) * canvas.height, 0.3 * canvas.width, 0.3 * canvas.height);
+        }
+        if (!lm) return;
+        g.fillStyle = dotColour;
+        for (const p of lm) { g.beginPath(); g.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 7); g.fill(); }
+      };
+      if (kind === "heat") {
+        $("#view").onclick = (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          spot = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+        };
+        stopVision = await trackGlow(video, (f) => {
+          buffer.push(f);
+          $("#angle").textContent = f[1].toFixed(0);
+          $("#level").style.width = `${Math.max(0, Math.min(100, f[2]))}%`;
+        }, { spot: () => spot, onHand });
+      } else {
+        stopVision = await trackHands(video, meter, (f) => {
+          buffer.push(f);
+          $("#angle").textContent = f[1].toFixed(0);
+          $("#level").style.width = `${Math.max(0, Math.min(100, (f[5] + 70) * 2))}%`;
+        }, { onHand });
+      }
       wakeLock = await navigator.wakeLock?.request("screen").catch(() => null);
       show("run", "finish", "voice-row");
       $("#view").classList.remove("hidden");
       $("#angle-box").classList.add("small");
-      $("#hint").textContent = "hand tilt · sound";
+      $("#hint").textContent = kind !== "heat" ? "hand tilt · sound"
+        : `steel colour · glow · tap the picture where the steel is${src ? "" : locked ? " · exposure locked" : " · this camera can't lock exposure, so keep the light steady"}`;
       $("#what").textContent = src ? "watching the video" : "watching through the camera";
       timer = true;
       sender = setInterval(flush, SEND_MS);
