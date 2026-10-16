@@ -27,7 +27,12 @@ log = logging.getLogger(__name__)
 SIMULATORS = {"sharpen": generate, "heat": generate_heat}
 
 
-def _simulated(session: dict, profile: str, seed: int | None) -> np.ndarray:
+def _simulated(service: Tsukumo, session: dict, profile: str, seed: int | None) -> np.ndarray:
+    skill = service.store.skill(session["skill_id"])
+    ref = skill and skill["reference_session_id"] and service.store.session(skill["reference_session_id"])
+    if ref and ref["source"].startswith("video:"):
+        # The simulator imitates a strapped phone; a camera-measured ghost is on another scale.
+        raise ValueError("this master was recorded on camera; train against it with the camera, not the simulator")
     frames, _ = SIMULATORS[session["kind"]](profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
     return frames
 
@@ -130,7 +135,7 @@ class Hub:
         ls = self.open(session_id)
         if ls.device or ls.sim_task:
             raise ValueError("a device is already streaming into this session")
-        frames = _simulated(ls.session, profile, seed)
+        frames = _simulated(self.service, ls.session, profile, seed)
         ls.sim_task = asyncio.create_task(self._play(session_id, frames, speed))
 
     def replay(self, session_id: str, profile: str, seed: int | None = None) -> dict:
@@ -144,7 +149,7 @@ class Hub:
         if s["status"] != "live" or session_id in self.live:
             raise ValueError("session is already recording or finished")
         coach = self.service.coach_for(session_id)
-        frames = _simulated(s, profile, seed)
+        frames = _simulated(self.service, s, profile, seed)
         events: list[dict] = []
         for frame in frames.tolist():
             for e in coach.update(tuple(frame)):

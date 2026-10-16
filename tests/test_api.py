@@ -106,6 +106,12 @@ def test_yakiire_replays_against_yamada(client):
     assert r["summary"]["report"]["overall"] < 75
 
 
+
+def test_camera_master_cannot_be_simulated_against(client):
+    s = client.post("/api/sessions", json={"skill_id": "kaiten", "person_id": "nguyen"}).json()
+    r = client.post(f"/api/sessions/{s['id']}/replay", json={"profile": "novice", "seed": 1})
+    assert r.status_code == 400 and "camera" in r.json()["detail"]
+
 def test_short_recording_is_discarded(client):
     ses = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
     with client.websocket_connect(f"/ws/device/{ses['id']}") as dev:
