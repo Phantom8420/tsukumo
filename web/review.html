@@ -31,6 +31,10 @@
         <span><i style="background:rgba(114,176,127,.5)"></i>answered</span></div>
     </div>
     <div class="grid" style="align-content:start">
+      <div class="panel hidden" id="footage">
+        <video id="clip" controls playsinline preload="metadata" style="width:100%;max-height:340px;border-radius:12px;background:var(--panel-2)"></video>
+        <p class="muted" id="credit" style="font-size:12px;margin-top:8px"></p>
+      </div>
       <div class="panel">
         <h3 style="margin-bottom:10px">Questions for the master <span class="ja">質問</span></h3>
         <div class="grid" id="surprises" style="gap:8px"></div>
@@ -139,9 +143,22 @@
       if (el) select(el.dataset.id);
     });
 
+    // Sessions recorded from a clip keep it, so the master can watch the moment the model asked about.
+    const clip = s.source.startsWith("video:") ? s.source.slice(6) : null;
+    const CREDITS = {
+      "media/grinder.webm": `Real footage: <a href="https://commons.wikimedia.org/wiki/File:Knife_sharpening_video.webm" target="_blank" rel="noopener">Knife sharpening video</a> by Vijayanrajapuram, CC BY-SA 4.0 (rotated, re-encoded). Measured by the camera tracker, not simulated.`,
+    };
+    if (clip) {
+      $("#footage").classList.remove("hidden");
+      $("#clip").src = clip;
+      $("#credit").innerHTML = CREDITS[clip] ?? "";
+    }
+
     function select(sid) {
       selected = sid;
       render();
+      const x = detail.surprises.find((y) => y.id === sid);
+      if (clip && x) { $("#clip").currentTime = Math.max(0, x.t_start - 1.5); $("#clip").play().catch(() => {}); }
     }
 
     function renderDetail() {

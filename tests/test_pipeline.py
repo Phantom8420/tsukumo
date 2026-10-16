@@ -120,3 +120,14 @@ def test_heat_coach_says_too_hot():
     coach = LiveCoach(extract(_heat(), "heat"), [], "en", "heat")
     buzzes = [e for f in _heat(peak_hue=45) for e in coach.update(f) if e["type"] == "buzz"]
     assert buzzes and buzzes[0]["channel"] == "hue" and buzzes[0]["direction"] == 1
+
+
+def test_real_footage_gives_strokes_and_habits():
+    """Frames the camera tracker took from real Commons footage, not the simulator."""
+    from tsukumo.seed import FOOTAGE
+
+    feat = extract(np.load(FOOTAGE), "sharpen")
+    assert 10 <= len(feat.stroke_times) <= 40
+    assert all(np.isfinite(feat.X[c]).all() for c in feat.channels)
+    # The wheel goes quiet whenever the blade lifts off it; those are real events worth asking about.
+    assert surprise.detect(feat)[0]

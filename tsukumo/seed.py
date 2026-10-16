@@ -1,14 +1,18 @@
 """Demo workshop: a Seki knife maker with two retiring masters and three apprentices.
 
-Everything here is fictional. The master's sharpening session and the
-apprentices' sessions are simulated, then pushed through the real pipeline
-(surprise detection, scoring), so what the demo shows is what the system
-actually computes.
+The workshop is fictional. Its sharpening sessions are simulated, then
+pushed through the real pipeline (surprise detection, scoring), so what the
+demo shows is what the system actually computes. One master is not simulated:
+the wheel-grinding session is real Wikimedia Commons footage that the camera
+tracker (web/js/vision.js) turned into frames, stored in footage/grinder.npy.
 """
 
 from __future__ import annotations
 
 import time
+from pathlib import Path
+
+import numpy as np
 
 from .services import Tsukumo
 from .simulate import generate
@@ -24,7 +28,11 @@ PEOPLE = [
          origin="Bandung, Indonesia", bio="Specified Skilled Worker, third year."),
     dict(id="sato", name="Sato Yui", name_native="佐藤 結衣", role="apprentice", lang="ja",
          origin="Gifu", bio="Joined after technical high school."),
+    dict(id="grinder", name="Street knife-grinder", role="master", lang="en",
+         origin="Wikimedia Commons footage", bio="Real, unscripted footage of a pedal-wheel grinder at work."),
 ]
+
+FOOTAGE = Path(__file__).parent / "footage" / "grinder.npy"
 
 SKILLS = [
     dict(id="honbazuke", name="Final edge sharpening", name_ja="本刃付け",
@@ -35,6 +43,8 @@ SKILLS = [
          description="Hammering the blank to shape at the forge."),
     dict(id="etsuke", name="Handle fitting", name_ja="柄付け",
          description="Fitting and setting the handle."),
+    dict(id="kaiten", name="Wheel grinding", name_ja="回転砥石研ぎ",
+         description="Edge grinding on a pedal-driven wheel, from real camera footage."),
 ]
 
 # Declared, not measured: what the workshop already knows about who can do what.
@@ -145,6 +155,9 @@ def seed(service: Tsukumo) -> dict:
             card_ids.append(card["id"])
         elif habit in CARDS:
             store.set_surprise_status(master["id"], s["id"], "dismissed", f"Same habit as an earlier card ({habit})")
+
+    real = service.create_session("kaiten", "grinder", source="video:media/grinder.webm", created_at=now - 2 * day)
+    service.finalize(real["id"], np.load(FOOTAGE))
 
     for person, profile, sd, days in APPRENTICE_RUNS:
         ses = service.create_session("honbazuke", person, source="seed", created_at=now - days * day)

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <meta name="theme-color" content="#0f0e0d">
   <title>TSUKUMO · Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500&family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/app.css">
   <style>
     html, body { height: 100%; overflow: hidden; }
@@ -26,6 +28,14 @@
     .overlay .k-title { font-size: 26px; }
     .overlay .kcard dl { grid-template-columns: 56px 1fr; font-size: 17px; }
     select { font-size: 16px; }
+    .sources { display: grid; gap: 10px; width: 100%; }
+    .sources .btn { display: grid; justify-content: stretch; justify-items: start; gap: 3px; width: 100%; text-align: left; white-space: normal; padding: 14px 16px; border-radius: 14px; }
+    .sources .btn b { font-weight: 500; font-size: 16px; }
+    .sources .btn small { color: var(--muted); font-size: 13px; font-weight: 400; }
+    .view { position: relative; width: min(100%, 360px); border-radius: 14px; overflow: hidden; background: var(--panel-2); }
+    .view video { display: block; width: 100%; height: auto; max-height: 42vh; object-fit: contain; }
+    .view canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #run .angle.small { font-size: 64px; }
   </style>
 </head>
 <body>
@@ -40,15 +50,21 @@
       <div class="grid" id="sessions"></div>
     </div>
     <div id="intro" class="hidden">
-      <div class="step-title">Strap this phone to the tool</div>
-      <p class="muted">Screen up, firmly attached. Sensors and microphone are needed to read angle, rhythm and the stone's sound.</p>
+      <div class="step-title" style="margin-bottom:12px">How should TSUKUMO watch?</div>
+      <div class="sources">
+        <button class="btn" id="src-camera"><b>Point the camera at the hands</b><small>Phone on a stand, hands and tool in frame. Nothing to strap on.</small></button>
+        <button class="btn" id="src-sensors"><b>Strap this phone to the tool</b><small>Most precise angle. Screen up, firmly attached.</small></button>
+        <label class="btn" for="src-file"><b>Use a recorded video</b><small>A clip of the work, with its sound.</small></label>
+        <input type="file" id="src-file" accept="video/*" class="hidden">
+      </div>
     </div>
     <div id="calib" class="hidden">
       <div class="step-title">Lay the blade flat on the stone</div>
       <p class="muted">Hold still, then tap Calibrate. Angles are measured from here.</p>
     </div>
     <div id="run" class="hidden" style="display:grid;gap:14px;justify-items:center">
-      <div class="angle"><span id="angle">0</span><small>°</small></div>
+      <div class="view hidden" id="view"><video id="video" playsinline muted></video><canvas id="hands"></canvas></div>
+      <div class="angle" id="angle-box"><span id="angle">0</span><small>°</small></div>
       <div class="level"><i id="level"></i></div>
       <div class="muted" id="hint" style="font-size:13px">stone sound</div>
       <div class="cue-text" id="cue"></div>
@@ -70,13 +86,16 @@
 <script type="module">
   import { api, socket } from "./js/api.js";
   import { esc, $, cardHTML } from "./js/ui.js";
+  import { trackHands, audioMeter } from "./js/vision.js";
 
   const SPEECH = { ja: "ja-JP", en: "en-US", vi: "vi-VN", id: "id-ID" };
   const HZ = 50, SEND_MS = 100;
   const show = (...ids) => ["pick", "intro", "calib", "run", "done", "enable", "calibrate", "go", "finish", "voice-row"]
     .forEach((id) => $(`#${id}`).classList.toggle("hidden", !ids.includes(id)));
 
-  let sessionId = new URLSearchParams(location.search).get("s");
+  const params = new URLSearchParams(location.search);
+  let sessionId = params.get("s");
+  let stopVision = null;
   let ws, lang = "en", role = "apprentice";
   const sensor = { up: null, lin: [0, 0, 0], grav: null, gotMotion: false };
   let up0 = null, side0 = null, audio = null, t0 = 0, buffer = [], timer = null, sender = null, wakeLock = null;
@@ -109,7 +128,11 @@
       $("#dot").classList.add("on");
       $("#who").textContent = m.session.person_name;
       $("#what").textContent = `${m.session.skill_name} · ${role}`;
-      if (!timer) { show("intro", "enable"); }
+      if (!timer && !stopVision) {
+        // ?video= runs a clip straight through, so footage can be processed unattended.
+        if (params.get("video")) startVision(params.get("video"));
+        else show("intro");
+      }
     } else if (m.type === "buzz") {
       cue(m);
     } else if (m.type === "card") {
@@ -124,11 +147,73 @@
         : `<div class="step-title">Recorded</div>`;
     } else if (m.type === "error") {
       $("#what").textContent = m.message;
-      if (!timer) show();
+      // Analysis failed after Finish: stop here rather than reconnect and hide the error.
+      if ($("#finish").disabled) { stop(); $("#cue").textContent = m.message; }
+      else if (!timer) show();
     }
   }
 
   // -- sensors --------------------------------------------------------------------
+
+  $("#src-sensors").onclick = () => show("calib", "enable");
+  $("#src-camera").onclick = () => startVision(null);
+  $("#src-file").onchange = (e) => e.target.files[0] && startVision(URL.createObjectURL(e.target.files[0]));
+
+  // Camera or video file: the hand tracker produces the same frames the strapped phone would.
+  async function startVision(src) {
+    const video = $("#video");
+    $("#what").textContent = "loading the hand tracker…";
+    try {
+      const ctx = new AudioContext();
+      let meter;
+      if (src) {
+        video.src = src;
+        video.muted = false;
+        const node = ctx.createMediaElementSource(video);
+        node.connect(ctx.destination);
+        meter = audioMeter(ctx, node);
+      } else {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 } },
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+        video.srcObject = stream;
+        meter = audioMeter(ctx, ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks())));
+      }
+      audio = { ctx };
+      if (video.readyState < 2) {
+        await new Promise((ok, fail) => { video.onloadeddata = ok; video.onerror = () => fail(new Error("can't read that video")); });
+      }
+      const canvas = $("#hands"), g = canvas.getContext("2d");
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      const dotColour = getComputedStyle(document.documentElement).getPropertyValue("--moegi").trim();
+      stopVision = await trackHands(video, meter, (f) => {
+        buffer.push(f);
+        $("#angle").textContent = f[1].toFixed(0);
+        $("#level").style.width = `${Math.max(0, Math.min(100, (f[5] + 70) * 2))}%`;
+      }, {
+        onHand: (lm) => {
+          g.clearRect(0, 0, canvas.width, canvas.height);
+          if (!lm) return;
+          g.fillStyle = dotColour;
+          for (const p of lm) { g.beginPath(); g.arc(p.x * canvas.width, p.y * canvas.height, 4, 0, 7); g.fill(); }
+        },
+      });
+      wakeLock = await navigator.wakeLock?.request("screen").catch(() => null);
+      show("run", "finish", "voice-row");
+      $("#view").classList.remove("hidden");
+      $("#angle-box").classList.add("small");
+      $("#hint").textContent = "hand tilt · sound";
+      $("#what").textContent = src ? "watching the video" : "watching through the camera";
+      timer = true;
+      sender = setInterval(flush, SEND_MS);
+      if (src) video.onended = () => $("#finish").click();
+      await video.play();
+    } catch (e) {
+      $("#what").textContent = src ? `${e.message}.` : `${e.message}. Allow the camera and microphone over https.`;
+      show("intro");
+    }
+  }
 
   $("#enable").onclick = async () => {
     try {
@@ -234,6 +319,9 @@
   }
 
   function stop() {
+    stopVision?.();
+    $("#video").pause();
+    $("#video").srcObject?.getTracks().forEach((t) => t.stop());
     clearInterval(timer);
     clearInterval(sender);
     timer = sender = null;
