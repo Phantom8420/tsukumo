@@ -32,27 +32,39 @@ def normalise(feat: Features, center: np.ndarray) -> np.ndarray:
 
 
 def dtw(A: np.ndarray, B: np.ndarray, band: float = 0.3) -> tuple[list[tuple[int, int]], float]:
-    """Banded DTW between (n, d) and (m, d). Returns the warping path and mean step cost."""
+    """Banded DTW between (n, d) and (m, d). Returns the warping path and mean step cost.
+
+    Row by row inside the band, keeping only one-byte back-pointers, so memory
+    grows with the band rather than with n * m (a half-hour session fits easily).
+    """
     n, m = len(A), len(B)
     w = max(int(band * max(n, m)), abs(n - m) + 1)
-    cost = np.sqrt(((A[:, None, :] - B[None, :, :]) ** 2).sum(axis=2))
-    D = np.full((n + 1, m + 1), np.inf)
-    D[0, 0] = 0.0
+    prev = np.full(m + 1, np.inf)
+    prev[0] = 0.0
+    moves = []                          # per row: (first column, 0 diagonal / 1 up / 2 left)
     for i in range(1, n + 1):
         j_center = int(round(i * m / n))
         lo, hi = max(1, j_center - w), min(m, j_center + w)
-        prev = D[i - 1]
-        for j in range(lo, hi + 1):
-            D[i, j] = cost[i - 1, j - 1] + min(prev[j - 1], prev[j], D[i, j - 1])
+        c = np.sqrt(((B[lo - 1:hi] - A[i - 1]) ** 2).sum(axis=1))
+        diag, up = prev[lo - 1:hi], prev[lo:hi + 1]
+        r = c + np.minimum(diag, up)
+        # D[j] = min(r[j], c[j] + D[j-1]) unrolled: D[j] = S[j] + min over k<=j of (r[k] - S[k]).
+        S = np.cumsum(c)
+        best = np.minimum.accumulate(r - S)
+        row = np.full(m + 1, np.inf)
+        row[lo:hi + 1] = S + best
+        moves.append((lo, np.where(best < r - S, 2, np.where(diag <= up, 0, 1)).astype(np.int8)))
+        prev = row
     i, j = n, m
     path = [(i - 1, j - 1)]
     while i > 1 or j > 1:
-        steps = ((D[i - 1, j - 1], i - 1, j - 1), (D[i - 1, j], i - 1, j), (D[i, j - 1], i, j - 1))
-        _, i, j = min(steps, key=lambda s: s[0])
+        lo, mv = moves[i - 1]
+        step = mv[j - lo]
+        i, j = (i - 1, j - 1) if step == 0 else (i - 1, j) if step == 1 else (i, j - 1)
         i, j = max(i, 1), max(j, 1)
         path.append((i - 1, j - 1))
     path.reverse()
-    return path, float(D[n, m] / len(path))
+    return path, float(prev[m] / len(path))
 
 
 @dataclass
