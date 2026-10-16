@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import secrets
 import socket
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -78,6 +79,23 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
     async def not_found(_: Request, exc: NotFound):
         return JSONResponse({"detail": f"not found: {exc}"}, status_code=404)
 
+    @app.exception_handler(PermissionError)
+    async def forbidden(_: Request, exc: PermissionError):
+        return JSONResponse({"detail": str(exc)}, status_code=403)
+
+    def guard(request: Request, source: str | None) -> None:
+        """Deleting or re-pointing the master's ghost can't be undone.
+
+        With TSUKUMO_KEY set, those need the workshop key. Without it (a public demo),
+        visitors can undo their own work but not the seeded workshop or the real footage.
+        """
+        key = os.environ.get("TSUKUMO_KEY")
+        if key:
+            if not secrets.compare_digest(request.headers.get("x-tsukumo-key", "").encode(), key.encode()):
+                raise PermissionError("this needs the workshop key")
+        elif source and (source == "seed" or source.startswith("video:")):
+            raise PermissionError("the demo workshop's own records can't be changed; run TSUKUMO locally to edit them")
+
     @app.exception_handler(ValueError)
     async def bad_request(_: Request, exc: ValueError):
         return JSONResponse({"detail": str(exc)}, status_code=400)
@@ -119,7 +137,10 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
         return store.skills()
 
     @app.post("/api/skills/{skill_id}/reference")
-    def set_reference(skill_id: str, body: Reference):
+    def set_reference(skill_id: str, body: Reference, request: Request):
+        skill = store.skill(skill_id)
+        current = skill and skill["reference_session_id"] and store.session(skill["reference_session_id"])
+        guard(request, current["source"] if current else None)
         service.set_reference(skill_id, body.session_id)
         return {"ok": True}
 
@@ -139,7 +160,9 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
         return service.detail(session_id)
 
     @app.delete("/api/sessions/{session_id}")
-    def delete_session(session_id: str):
+    def delete_session(session_id: str, request: Request):
+        s = store.session(session_id)
+        guard(request, s["source"] if s else None)
         if session_id in hub.live:
             raise ValueError("session is still recording")
         service.delete_session(session_id)
@@ -187,7 +210,9 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
         return store.cards(skill_id=skill_id)
 
     @app.delete("/api/cards/{card_id}")
-    def delete_card(card_id: str):
+    def delete_card(card_id: str, request: Request):
+        card = store.card(card_id)
+        guard(request, card["source"] if card else None)
         service.delete_card(card_id)
         return {"ok": True}
 

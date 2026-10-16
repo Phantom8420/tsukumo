@@ -115,6 +115,10 @@ server to run the whole session in one request (`POST /api/sessions/{id}/replay`
 events back in the browser. Each function instance has its own `/tmp` database: edits and new
 sessions are per instance and vanish on the next cold start.
 
+Deleting sessions or cards and changing a skill's master can't be undone. With `TSUKUMO_KEY` set,
+those need the workshop key, which the browser asks for once. Without it, as on the public demo,
+visitors can undo their own work but can't touch the seeded workshop or the real footage.
+
 ## Demo script (3 min)
 
 1. **Workshop** page: two retiring masters, four skills, two with nobody ready to take over.

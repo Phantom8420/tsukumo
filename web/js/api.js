@@ -1,12 +1,21 @@
 // Thin wrappers over the REST + WebSocket API.
 
-async function request(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+const KEY = "tsukumo-key";
+const savedKey = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
+
+async function request(method, path, body, retried = false) {
+  const headers = body ? { "Content-Type": "application/json" } : {};
+  if (savedKey()) headers["X-Tsukumo-Key"] = savedKey();
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const data = await res.json().catch(() => ({}));
+  // A workshop with TSUKUMO_KEY set asks for it once, the first time it's needed.
+  if (res.status === 403 && /workshop key/.test(data.detail) && !retried) {
+    const key = prompt("Workshop key");
+    if (key) {
+      try { localStorage.setItem(KEY, key); } catch {}
+      return request(method, path, body, true);
+    }
+  }
   if (!res.ok) throw new Error(data.detail || `${res.status} ${res.statusText}`);
   return data;
 }

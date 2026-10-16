@@ -133,11 +133,14 @@ def test_radar_and_ledger(client):
     assert ledger[0]["master"]["id"] == "tanaka" and ledger[0]["credits_yen"] > 0
 
 
-def test_errors(client):
+def test_errors(client, monkeypatch):
     assert client.get("/api/sessions/nope").status_code == 404
     assert client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "ghost"}).status_code == 404
-    master = client.get("/api/sessions", params={"role": "apprentice"}).json()[0]
-    assert client.post("/api/skills/honbazuke/reference", json={"session_id": master["id"]}).status_code == 400
+    apprentice = client.get("/api/sessions", params={"role": "apprentice"}).json()[0]
+    assert client.post("/api/skills/honbazuke/reference", json={"session_id": apprentice["id"]}).status_code == 403
+    monkeypatch.setenv("TSUKUMO_KEY", "k3y")
+    assert client.post("/api/skills/honbazuke/reference", json={"session_id": apprentice["id"]},
+                       headers={"X-Tsukumo-Key": "k3y"}).status_code == 400
 
 
 def test_camera_frames_mark_the_session_and_need_a_wider_pass():
@@ -155,3 +158,14 @@ def test_device_reports_camera_source(client):
         dev.send_json({"type": "frames", "source": "camera", "frames": [[0, 15, 0, 0, 0, -30, 1800]]})
         dev.send_json({"type": "frames", "source": "camera", "frames": [[100, 15, 0, 0, 0, -30, 1800]]})
         assert client.get(f"/api/sessions/{ses['id']}").json()["session"]["source"] == "camera"
+
+
+def test_demo_records_are_protected_and_a_key_unlocks_them(client, monkeypatch):
+    seeded = next(c for c in client.get("/api/cards", params={"skill_id": "honbazuke"}).json() if c["source"] == "seed")
+    assert client.delete(f"/api/cards/{seeded['id']}").status_code == 403
+    mine = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
+    assert client.delete(f"/api/sessions/{mine['id']}").status_code == 200
+
+    monkeypatch.setenv("TSUKUMO_KEY", "k3y")
+    assert client.delete(f"/api/cards/{seeded['id']}", headers={"X-Tsukumo-Key": "wrong"}).status_code == 403
+    assert client.delete(f"/api/cards/{seeded['id']}", headers={"X-Tsukumo-Key": "k3y"}).status_code == 200
