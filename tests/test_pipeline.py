@@ -4,7 +4,7 @@ import pytest
 from tsukumo import align, surprise
 from tsukumo.coach import LiveCoach
 from tsukumo.signals import extract, resample
-from tsukumo.simulate import generate
+from tsukumo.simulate import generate, generate_heat
 
 
 @pytest.fixture(scope="module")
@@ -131,3 +131,15 @@ def test_real_footage_gives_strokes_and_habits():
     assert all(np.isfinite(feat.X[c]).all() for c in feat.channels)
     # The wheel goes quiet whenever the blade lifts off it; those are real events worth asking about.
     assert surprise.detect(feat)[0]
+
+
+def test_heat_simulator_ranks_profiles_and_catches_the_turn_and_check():
+    master = extract(generate_heat("master", seed=0)[0], "heat")
+    scores = {p: align.score(master, extract(generate_heat(p, seed=5)[0], "heat")).overall
+              for p in ("master", "skilled", "novice")}
+    assert scores["master"] > 95 > scores["skilled"] > 80 > 75 > scores["novice"]
+    frames, events = generate_heat("master", seed=1)
+    found = [s.t_start for s in surprise.detect(extract(frames, "heat"))[0]]
+    for habit in ("turn", "check"):
+        at = next(e["t"] for e in events if e["habit"] == habit)
+        assert any(abs(t - at) < 2.5 for t in found), habit

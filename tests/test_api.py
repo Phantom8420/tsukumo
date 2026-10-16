@@ -95,6 +95,17 @@ def test_replay_runs_a_whole_session_over_http(client):
     assert client.post(f"/api/sessions/{s['id']}/replay", json={}).status_code == 400
 
 
+def test_yakiire_replays_against_yamada(client):
+    """Heat work runs live end to end: buzzes in the apprentice's language, Yamada's cards, a score."""
+    assert len(client.get("/api/cards", params={"skill_id": "yakiire"}).json()) == 2
+    s = client.post("/api/sessions", json={"skill_id": "yakiire", "person_id": "nguyen"}).json()
+    r = client.post(f"/api/sessions/{s['id']}/replay", json={"profile": "novice", "seed": 9}).json()
+    buzzes = [e for e in r["events"] if e["type"] == "buzz"]
+    assert buzzes and buzzes[0]["channel"] in ("hue", "brightness")
+    assert any(e["type"] == "card" for e in r["events"])
+    assert r["summary"]["report"]["overall"] < 75
+
+
 def test_short_recording_is_discarded(client):
     ses = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
     with client.websocket_connect(f"/ws/device/{ses['id']}") as dev:

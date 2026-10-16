@@ -19,15 +19,16 @@ from starlette.concurrency import run_in_threadpool
 from .coach import LiveCoach
 from .config import KINDS
 from .services import Tsukumo
-from .simulate import generate
+from .simulate import generate, generate_heat
 
 log = logging.getLogger(__name__)
 
 
+SIMULATORS = {"sharpen": generate, "heat": generate_heat}
+
+
 def _simulated(session: dict, profile: str, seed: int | None) -> np.ndarray:
-    if session["kind"] != "sharpen":
-        raise ValueError(f"no simulator for {session['kind']} work yet")
-    frames, _ = generate(profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
+    frames, _ = SIMULATORS[session["kind"]](profile, seed=seed if seed is not None else int(np.random.default_rng().integers(1e6)))
     return frames
 
 

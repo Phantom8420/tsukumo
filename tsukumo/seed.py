@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .services import Tsukumo
-from .simulate import generate
+from .simulate import generate, generate_heat
 
 PEOPLE = [
     dict(id="tanaka", name="Tanaka Ken'ichi", name_native="田中 健一", role="master", lang="ja",
@@ -103,6 +103,52 @@ CARDS = {
     },
 }
 
+# Yamada's answers for the two forge habits the sensors caught.
+HEAT_CARDS = {
+    "turn": {
+        "transcript": "色が揃ったら、半分のところで一度刃を返す。火の中で峰の方が遅れるから、返さないと峰だけ焼きが甘くなる。",
+        "content": {
+            "ja": {"title": "沸かしの途中で一度返す",
+                   "trigger": "色が揃ってきて、保持時間の半分ほど",
+                   "action": "火の中で刃を一度ひっくり返す",
+                   "reason": "峰の方は火の当たりが遅れる。返さないと峰だけ焼きが甘くなる。"},
+            "en": {"title": "Turn the blade once during the soak",
+                   "trigger": "About halfway through the soak, once the colour is even",
+                   "action": "Roll the blade over once in the fire",
+                   "reason": "The spine lags behind in the fire. Skip the turn and the spine comes out soft."},
+            "vi": {"title": "Lật lưỡi dao một lần khi ủ nhiệt",
+                   "trigger": "Khoảng giữa thời gian ủ, khi màu đã đều",
+                   "action": "Lật lưỡi dao một lần trong lửa",
+                   "reason": "Sống dao nóng chậm hơn. Không lật thì sống dao sẽ bị mềm."},
+            "id": {"title": "Balik bilah sekali saat penahanan panas",
+                   "trigger": "Sekitar pertengahan waktu tahan, saat warnanya sudah rata",
+                   "action": "Balik bilah sekali di dalam api",
+                   "reason": "Punggung bilah lebih lambat panas. Tanpa dibalik, punggungnya jadi lunak."},
+        },
+    },
+    "check": {
+        "transcript": "入れる直前に一瞬火から出して、影で色を見る。火の中だと明るく見えすぎる。外で桜色なら水に入れていい。",
+        "content": {
+            "ja": {"title": "入れる前に火の外で色を見る",
+                   "trigger": "焼入れの直前",
+                   "action": "一瞬だけ火から出し、影で色を確かめる。外で桜色なら焼きを入れる。",
+                   "reason": "火の中では照り返しで色が明るく見えすぎる。外で見ないと温度を読み違える。"},
+            "en": {"title": "Read the colour outside the fire before quenching",
+                   "trigger": "Just before the quench",
+                   "action": "Pull the blade out for a second and read the colour in shadow. Cherry outside means quench now.",
+                   "reason": "Inside the fire the glare makes steel look hotter than it is. Read it there and you misjudge the heat."},
+            "vi": {"title": "Xem màu bên ngoài lửa trước khi tôi",
+                   "trigger": "Ngay trước khi tôi",
+                   "action": "Rút lưỡi ra một giây và xem màu trong bóng râm. Màu anh đào bên ngoài nghĩa là tôi ngay.",
+                   "reason": "Trong lửa, ánh sáng làm thép trông nóng hơn thực tế. Xem trong lửa sẽ đoán sai nhiệt độ."},
+            "id": {"title": "Baca warna di luar api sebelum dicelup",
+                   "trigger": "Tepat sebelum pencelupan",
+                   "action": "Tarik bilah keluar sedetik dan lihat warnanya di tempat teduh. Merah ceri di luar berarti celup sekarang.",
+                   "reason": "Di dalam api, silau membuat baja tampak lebih panas dari sebenarnya. Membaca di sana membuat salah menilai suhu."},
+        },
+    },
+}
+
 # (apprentice, profile, seed, days ago)
 APPRENTICE_RUNS = [
     ("nguyen", "novice", 11, 9), ("nguyen", "novice", 12, 5), ("nguyen", "skilled", 13, 1),
@@ -156,6 +202,8 @@ def seed(service: Tsukumo) -> dict:
         elif habit in CARDS:
             store.set_surprise_status(master["id"], s["id"], "dismissed", f"Same habit as an earlier card ({habit})")
 
+    _seed_heat(service, now, day)
+
     real = service.create_session("kaiten", "grinder", source="video:media/grinder.webm", created_at=now - 2 * day)
     service.finalize(real["id"], np.load(FOOTAGE))
 
@@ -167,3 +215,28 @@ def seed(service: Tsukumo) -> dict:
             store.log_card_view(cid, person, ses["id"], at=now - days * day)
 
     return {"seeded": True, "master_session": master["id"]}
+
+
+def _seed_heat(service: Tsukumo, now: float, day: float) -> None:
+    """Yamada's quench-hardening session, his two cards, and two apprentices trying it."""
+    store = service.store
+    master = service.create_session("yakiire", "yamada", source="seed", created_at=now - 10 * day)
+    frames, events = generate_heat("master", seed=0)
+    service.finalize(master["id"], frames)
+    card_ids, used = [], set()
+    for s in store.surprises(master["id"]):
+        habit = _match([s], events).get(s["id"])
+        if habit in HEAT_CARDS and habit not in used:
+            used.add(habit)
+            spec = HEAT_CARDS[habit]
+            card = store.add_card(skill_id="yakiire", master_id="yamada", stroke_index=s["stroke_index"],
+                                  content=spec["content"], source="seed", session_id=master["id"],
+                                  surprise_id=s["id"], transcript=spec["transcript"], transcript_lang="ja",
+                                  evidence={"kind": s["kind"], "summary": s["summary"], "t_start": s["t_start"]})
+            store.set_surprise_status(master["id"], s["id"], "answered", card["id"])
+            card_ids.append(card["id"])
+    for person, profile, sd, days in (("nguyen", "novice", 41, 4), ("sato", "skilled", 42, 1)):
+        ses = service.create_session("yakiire", person, source="seed", created_at=now - days * day)
+        service.finalize(ses["id"], generate_heat(profile, seed=sd)[0])
+        for cid in card_ids:
+            store.log_card_view(cid, person, ses["id"], at=now - days * day)

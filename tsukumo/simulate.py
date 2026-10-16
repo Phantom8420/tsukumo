@@ -124,3 +124,77 @@ def generate(profile: str | Profile = "master", fs: float = 50.0, seed: int = 0
         frames[i] = (t[i] * 1000.0, angle, a[0], a[1], a[2], loud, tone)
 
     return frames, events
+
+
+# -- heat treatment (焼入れ) ------------------------------------------------------------
+#
+# The master's tacit habits at the forge:
+#   soak  - holds the blade at an even bright-cherry colour well past "it looks red"
+#   turn  - rolls the blade over in the fire halfway through the soak so the spine catches up
+#   check - pulls it out for a second at the end to read the colour away from the fire's glare
+#   quench - plunges and agitates up and down in the water, never side to side
+# Apprentices overshoot the colour, cut the soak short and skip the turn and the check.
+
+
+@dataclass(frozen=True)
+class HeatProfile:
+    hue: float = 18.0               # bright cherry
+    glow: float = 68.0
+    jitter: float = 0.6
+    heat_up: float = 22.0           # seconds to reach colour
+    soak: float = 14.0
+    habits: tuple[str, ...] = ("soak", "turn", "check", "quench")
+
+
+HEAT_PROFILES = {
+    "master": HeatProfile(),
+    "skilled": HeatProfile(hue=20.0, glow=71.0, jitter=1.0, heat_up=19.0, soak=10.0,
+                           habits=("soak", "turn", "quench")),
+    "novice": HeatProfile(hue=27.0, glow=82.0, jitter=1.8, heat_up=15.0, soak=4.0, habits=("quench",)),
+}
+
+
+def generate_heat(profile: str | HeatProfile = "master", fs: float = 30.0, seed: int = 0
+                  ) -> tuple[np.ndarray, list[dict]]:
+    """Return (N, 6) raw frames [t_ms, hue, bright, ax, ay, az] plus the habit events performed."""
+    p = HEAT_PROFILES[profile] if isinstance(profile, str) else profile
+    rng = np.random.default_rng(seed)
+    start = 3.0                                   # blade goes into the fire
+    soak_at = start + p.heat_up
+    turn_at = soak_at + p.soak / 2 if "turn" in p.habits else None
+    check_at = soak_at + p.soak - 1.2 if "check" in p.habits else None
+    quench_at = soak_at + p.soak
+    n = int((quench_at + 12.0) * fs)
+    events = [{"habit": "soak", "t": soak_at, "duration": p.soak}] if "soak" in p.habits else []
+    events += [{"habit": h, "t": at} for h, at in (("turn", turn_at), ("check", check_at), ("quench", quench_at)) if at]
+
+    frames = np.zeros((n, 6))
+    hue = glow = 0.0
+    for i in range(n):
+        ti = i / fs
+        if ti < start:
+            target_h, target_g = 0.0, 0.0
+        elif ti < quench_at:
+            # Steel heats fast at first and slowly as it nears the fire's temperature.
+            k = 1 - np.exp(-3 * min(ti - start, p.heat_up) / p.heat_up)
+            target_h, target_g = p.hue * k / 0.95, p.glow * k / 0.95
+        else:
+            target_h = target_g = 0.0
+        if check_at and check_at <= ti < check_at + 1.0:
+            target_h, target_g = target_h - 3.0, target_g - 9.0     # out of the fire's glare: reads darker
+        # Colour follows heat with a lag; quenching kills the glow in about a second.
+        rate = 1.2 if ti >= quench_at else 0.25
+        hue += (target_h - hue) * min(1.0, (1 / fs) / rate)
+        glow += (target_g - glow) * min(1.0, (1 / fs) / rate)
+        lit = glow > 15
+        h = max(0.0, hue + (rng.normal(0, p.jitter) if lit else rng.normal(0, 4)))
+        g = max(0.0, glow + rng.normal(0, p.jitter * 1.5))
+
+        a = rng.normal(0, 0.08, 3)
+        if turn_at and turn_at <= ti < turn_at + 1.2:
+            a += np.array([0.0, 0.0, 2.2 * np.sin(2 * np.pi * (ti - turn_at) / 1.2)])
+        if quench_at <= ti < quench_at + 6.0:
+            # Plunge, then up-and-down agitation.
+            a += np.array([0.3, 3.0 * np.sin(2 * np.pi * 1.5 * (ti - quench_at)), 0.0]) * np.exp(-(ti - quench_at) / 4)
+        frames[i] = (ti * 1000.0, h, g, *a)
+    return frames, events

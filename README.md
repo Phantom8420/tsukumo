@@ -47,6 +47,19 @@ What it showed about camera capture, measured rather than assumed:
 To process another clip: create a session, then open `phone.html?s=<id>&video=<url>`. It plays the
 clip, streams frames and finishes on its own.
 
+## Second craft: quench hardening
+
+To show the pipeline isn't knife-sharpening code, **Quench hardening** (焼入れ) runs on different
+channels: the steel's colour and glow (from the camera), soak time at heat, and hand movement.
+Yamada's master session has two answered questions: a turn of the blade halfway through the soak and
+a pull from the fire to check its colour. Both were found by the same surprise model, without being
+told what to look for. The simulator gives these scores against Yamada over three seeds: master 100,
+skilled 92-93, novice 67-68. The novice soaks too short and runs hot, so it falls below the 75 pass mark.
+Only time at heat is scored. Before the fire and after the quench everyone's steel is dark, and
+counting those frames let a novice reach 80.
+
+One-link version: `live.html?person=nguyen&skill=yakiire&sim=novice&speed=4`.
+
 ## Run it
 
 Requires Python 3.11+.

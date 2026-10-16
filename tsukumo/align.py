@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .config import FS, channel
-from .signals import Features
+from .signals import Features, HoldTimer
 
 ALIGN_FS = 5.0
 
@@ -116,7 +116,12 @@ def score(master: Features, apprentice: Features) -> ScoreReport:
 
     diff = A[ia] - M[im]                                  # in tolerance units
     credit = np.exp(-np.log(2) * diff ** 2)               # 1 at perfect, 0.5 at one tolerance
-    channels = {c: float(100 * credit[:, k].mean()) for k, c in enumerate(chans)}
+    keep = np.ones(len(path), dtype=bool)
+    if "brightness" in chans:
+        # Before the fire and after the quench everyone's steel is dark: only time at heat is the skill.
+        k, spec = chans.index("brightness"), channel(master.kind, "brightness")
+        keep = np.maximum(A[ia, k], M[im, k]) * spec["tol"] + center[k] >= HoldTimer.GLOW_MIN
+    channels = {c: float(100 * credit[keep, k].mean()) for k, c in enumerate(chans)}
     overall = float(_spec(master, "weight") @ [channels[c] for c in chans])
 
     # Per apprentice sample: the master sample it was matched to (last match wins).
