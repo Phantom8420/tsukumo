@@ -98,7 +98,7 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
             "profiles": list(PROFILES),
             # Serverless hosts can't hold WebSockets: no phone, and the simulator replays over HTTP.
             "realtime": not os.environ.get("VERCEL"),
-            "certify": {"score": config.CERTIFY_SCORE, "sessions": config.CERTIFY_SESSIONS},
+            "certify": {"score": config.CERTIFY_SCORE, "sessions": config.CERTIFY_SESSIONS, "camera_margin": config.CAMERA_NOISE},
             "ai": "offline" if config.OFFLINE or not (os.environ.get("ANTHROPIC_API_KEY")
                                                        or os.environ.get("ANTHROPIC_AUTH_TOKEN")) else "claude",
         }
@@ -226,7 +226,7 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
             while True:
                 msg = await ws.receive_json()
                 if msg.get("type") == "frames":
-                    await hub.ingest(session_id, msg.get("frames", []))
+                    await hub.ingest(session_id, msg.get("frames", []), msg.get("source"))
                 elif msg.get("type") == "end":
                     await hub.end(session_id)
                     break

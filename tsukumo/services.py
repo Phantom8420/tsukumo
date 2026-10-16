@@ -9,12 +9,21 @@ import numpy as np
 
 from . import align, kotsu, surprise
 from .coach import LiveCoach
-from .config import CERTIFY_SCORE, CERTIFY_SESSIONS, FS, ROYALTY_YEN_PER_VIEW
+from .config import CAMERA_NOISE, CERTIFY_SCORE, CERTIFY_SESSIONS, FS, ROYALTY_YEN_PER_VIEW
 from .signals import Features, extract
 from .store import Store
 
 MIN_SESSION_S = 5.0
 FEATURE_STEP = 3   # samples per point sent to the browser (FS / 3 = 10 Hz)
+
+
+def by_camera(source: str) -> bool:
+    return source == "camera" or source.startswith("video")
+
+
+def passes(session: dict) -> bool:
+    """A camera score is only a pass if it clears the mark by more than the tracker's own noise."""
+    return session["score"] - (CAMERA_NOISE if by_camera(session["source"]) else 0) >= CERTIFY_SCORE
 
 
 class NotFound(LookupError):
@@ -171,29 +180,30 @@ class Tsukumo:
         skills = []
         for skill_id, sessions in by_skill.items():
             scores = [s["score"] for s in sessions]
-            passed = sum(sc >= CERTIFY_SCORE for sc in scores)
+            passed = sum(passes(s) for s in sessions)
             skills.append({
                 "skill_id": skill_id,
                 "skill_name": sessions[0]["skill_name"],
                 "sessions": len(sessions),
                 "best": round(max(scores), 1),
                 "latest": round(scores[-1], 1),
-                "history": [{"session_id": s["id"], "score": round(s["score"], 1), "at": s["created_at"]}
+                "history": [{"session_id": s["id"], "score": round(s["score"], 1), "at": s["created_at"],
+                             "camera": by_camera(s["source"]), "passed": passes(s)}
                             for s in sessions],
                 "certified": passed >= CERTIFY_SESSIONS,
                 "to_certify": max(0, CERTIFY_SESSIONS - passed),
             })
         return {"person": person, "skills": skills, "cards_learned": self.store.views_by(person_id),
-                "certify_rule": {"score": CERTIFY_SCORE, "sessions": CERTIFY_SESSIONS}}
+                "certify_rule": {"score": CERTIFY_SCORE, "sessions": CERTIFY_SESSIONS, "camera_margin": CAMERA_NOISE}}
 
     def _certified(self) -> dict[str, set[str]]:
         """skill_id -> apprentice ids who have measurably taken the skill over."""
-        passes: dict[tuple[str, str], int] = defaultdict(int)
+        wins: dict[tuple[str, str], int] = defaultdict(int)
         for s in self.store.sessions(role="apprentice", status="done"):
-            if s["score"] is not None and s["score"] >= CERTIFY_SCORE:
-                passes[(s["skill_id"], s["person_id"])] += 1
+            if s["score"] is not None and passes(s):
+                wins[(s["skill_id"], s["person_id"])] += 1
         certified: dict[str, set[str]] = defaultdict(set)
-        for (skill_id, person_id), n in passes.items():
+        for (skill_id, person_id), n in wins.items():
             if n >= CERTIFY_SESSIONS:
                 certified[skill_id].add(person_id)
         return certified

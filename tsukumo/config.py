@@ -64,6 +64,8 @@ LANG_NAMES = {"ja": "日本語", "en": "English", "vi": "Tiếng Việt", "id": 
 # A skill counts as handed over once an apprentice has this many sessions at this score.
 CERTIFY_SCORE = 75.0
 CERTIFY_SESSIONS = 2
+# The camera tracker scored the same clip 87% against itself: a camera pass must clear the mark by that much.
+CAMERA_NOISE = 13.0
 
 CLAUDE_MODEL = os.environ.get("TSUKUMO_MODEL", "claude-opus-5-5")
 OFFLINE = os.environ.get("TSUKUMO_OFFLINE") == "1"

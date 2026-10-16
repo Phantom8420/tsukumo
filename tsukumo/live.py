@@ -79,10 +79,14 @@ class Hub:
     async def device_status(self, ls: LiveSession, connected: bool, source: str) -> None:
         await self.broadcast(ls, {"type": "device", "connected": connected, "source": source})
 
-    async def ingest(self, session_id: str, frames: list) -> None:
+    async def ingest(self, session_id: str, frames: list, source: str | None = None) -> None:
         ls = self.live.get(session_id)
         if ls is None or ls.ending:
             return
+        if source in ("camera", "video") and ls.session["source"] == "phone":
+            # Camera scores carry more noise; certification needs to know which this was.
+            self.service.store.set_source(session_id, source)
+            ls.session["source"] = source
         out: list[dict] = []
         width = len(KINDS[ls.session["kind"]]["raw"])
         for f in frames:

@@ -198,6 +198,9 @@ class Store:
             sql += " WHERE " + " AND ".join(where)
         return self._rows(sql + " ORDER BY s.created_at DESC", args)
 
+    def set_source(self, session_id: str, source: str) -> None:
+        self._exec("UPDATE sessions SET source = ? WHERE id = ?", (source, session_id))
+
     def finish_session(self, session_id: str, duration: float, strokes: int,
                        score: float | None = None, report: dict | None = None) -> None:
         self._exec(

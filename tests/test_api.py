@@ -138,3 +138,20 @@ def test_errors(client):
     assert client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "ghost"}).status_code == 404
     master = client.get("/api/sessions", params={"role": "apprentice"}).json()[0]
     assert client.post("/api/skills/honbazuke/reference", json={"session_id": master["id"]}).status_code == 400
+
+
+def test_camera_frames_mark_the_session_and_need_a_wider_pass():
+    from tsukumo.services import passes
+    assert passes({"score": 80.0, "source": "phone"})
+    assert not passes({"score": 80.0, "source": "camera"})
+    assert not passes({"score": 87.0, "source": "video:media/grinder.webm"})
+    assert passes({"score": 88.0, "source": "camera"})
+
+
+def test_device_reports_camera_source(client):
+    ses = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()
+    with client.websocket_connect(f"/ws/device/{ses['id']}") as dev:
+        dev.receive_json()
+        dev.send_json({"type": "frames", "source": "camera", "frames": [[0, 15, 0, 0, 0, -30, 1800]]})
+        dev.send_json({"type": "frames", "source": "camera", "frames": [[100, 15, 0, 0, 0, -30, 1800]]})
+        assert client.get(f"/api/sessions/{ses['id']}").json()["session"]["source"] == "camera"

@@ -95,7 +95,7 @@
 
   const params = new URLSearchParams(location.search);
   let sessionId = params.get("s");
-  let stopVision = null;
+  let stopVision = null, captureSource = "phone";
   let ws, lang = "en", role = "apprentice";
   const sensor = { up: null, lin: [0, 0, 0], grav: null, gotMotion: false };
   let up0 = null, side0 = null, audio = null, t0 = 0, buffer = [], timer = null, sender = null, wakeLock = null;
@@ -161,6 +161,7 @@
 
   // Camera or video file: the hand tracker produces the same frames the strapped phone would.
   async function startVision(src) {
+    captureSource = src ? "video" : "camera";
     const video = $("#video");
     $("#what").textContent = "loading the hand tracker…";
     try {
@@ -314,7 +315,7 @@
 
   function flush() {
     if (!buffer.length || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ type: "frames", frames: buffer }));
+    ws.send(JSON.stringify({ type: "frames", frames: buffer, source: captureSource }));
     buffer = [];
   }
 

@@ -73,7 +73,7 @@
       <td class="num">${l.cards}</td><td class="num">${l.views}</td>
       <td class="num">¥${l.credits_yen.toLocaleString()}</td></tr>`).join("");
 
-  $("#rule").textContent = `Certified at ${meta.certify.score}% on ${meta.certify.sessions} sessions`;
+  $("#rule").textContent = `Certified at ${meta.certify.score}% on ${meta.certify.sessions} sessions (${meta.certify.score + meta.certify.camera_margin}% when filmed)`;
   const apprentices = people.filter((p) => p.role === "apprentice");
   const passports = await Promise.all(apprentices.map((p) => api.get(`/api/passport/${p.id}`)));
   $("#passports").innerHTML = passports.map(({ person, skills, cards_learned }) => `
