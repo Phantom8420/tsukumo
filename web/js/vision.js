@@ -8,16 +8,27 @@ const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
 const MODEL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 const PALM_M = 0.085;   // wrist to middle knuckle on an adult hand: the only ruler a camera has
 
-let landmarker;
-async function model() {
-  if (!landmarker) {
+const landmarkers = {};
+// The GPU runs several times faster, so fewer live frames are missed; not every browser has one.
+// Recordings use image mode: each frame is found afresh, because video mode's frame-to-frame
+// tracking gave a different hand path on every run of the same clip.
+async function model(recording) {
+  const key = recording ? "file" : "live";
+  if (!landmarkers[key]) {
     const files = await FilesetResolver.forVisionTasks(WASM);
-    landmarker = await HandLandmarker.createFromOptions(files, {
-      baseOptions: { modelAssetPath: MODEL, delegate: "CPU" },
-      runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.3, minTrackingConfidence: 0.3,
-    });
+    for (const d of ["GPU", "CPU"]) {
+      try {
+        landmarkers[key] = await HandLandmarker.createFromOptions(files, {
+          baseOptions: { modelAssetPath: MODEL, delegate: d },
+          runningMode: recording ? "IMAGE" : "VIDEO", numHands: 2, minHandDetectionConfidence: 0.3, minTrackingConfidence: 0.3,
+        });
+        break;
+      } catch (e) {
+        if (d === "CPU") throw e;
+      }
+    }
   }
-  return landmarker;
+  return landmarkers[key];
 }
 
 // Exponential smoother with a time constant, so uneven frame gaps don't change its feel.
@@ -86,6 +97,76 @@ function follow() {
   };
 }
 
+// A recording's sound at any moment, read from the decoded file rather than from playback.
+export async function fileSound(ctx, url) {
+  const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer());
+  const pcm = buf.getChannelData(0), N = 2048, re = new Float64Array(N), im = new Float64Array(N);
+  // Blackman window, as the live meter's AnalyserNode uses.
+  const win = Float64Array.from({ length: N }, (_, i) => 0.42 - 0.5 * Math.cos(2 * Math.PI * i / N) + 0.08 * Math.cos(4 * Math.PI * i / N));
+  return (s) => {
+    const end = Math.min(pcm.length, Math.round(s * buf.sampleRate)), start = end - N;
+    let e = 0;
+    for (let i = 0; i < N; i++) {
+      const v = start + i >= 0 ? pcm[start + i] : 0;
+      e += v * v;
+      re[i] = v * win[i];
+      im[i] = 0;
+    }
+    fft(re, im);
+    const binHz = buf.sampleRate / N;
+    let num = 0, den = 0;
+    for (let i = Math.floor(150 / binHz); i < Math.min(N / 2, 8000 / binHz); i++) {
+      const m = Math.hypot(re[i], im[i]);
+      num += m * i * binHz;
+      den += m;
+    }
+    return [10 * Math.log10(e / N + 1e-12), den > 0 ? num / den : 0];
+  };
+}
+
+// In-place radix-2 FFT; the length must be a power of two.
+export function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const a = -2 * Math.PI / len;
+    for (let i = 0; i < n; i += len) {
+      for (let k = 0; k < len / 2; k++) {
+        const c = Math.cos(a * k), sn = Math.sin(a * k), p = i + k, q = p + len / 2;
+        const tr = re[q] * c - im[q] * sn, ti = re[q] * sn + im[q] * c;
+        re[q] = re[p] - tr; im[q] = im[p] - ti;
+        re[p] += tr; im[p] += ti;
+      }
+    }
+  }
+}
+
+// A recording is stepped through at a fixed rate instead of played: every run sees the same frames,
+// so the same clip always gives the same score. Fires "ended" on the video when done.
+function stepThrough(video, fps, frame) {
+  let running = true;
+  // The tracker reads a canvas copy: handed the <video> itself, it sometimes grabbed a stale frame.
+  const still = document.createElement("canvas");
+  still.width = video.videoWidth;
+  still.height = video.videoHeight;
+  const g = still.getContext("2d", { willReadFrequently: true });
+  (async () => {
+    for (let t = 0.5 / fps; running && t < video.duration; t += 1 / fps) {
+      await new Promise((ok) => { video.addEventListener("seeked", ok, { once: true }); video.currentTime = t; });
+      g.drawImage(video, 0, 0);
+      if (running) frame(t * 1000, still);
+      await new Promise((ok) => setTimeout(ok, 0));   // let the page send what it has
+    }
+    if (running) video.dispatchEvent(new Event("ended"));
+  })();
+  return () => { running = false; };
+}
+
 // Call `frame(t_ms)` once per new video frame until the returned stop function is called.
 function everyFrame(video, frame) {
   let running = true, last = -1;
@@ -93,7 +174,7 @@ function everyFrame(video, frame) {
     if (!running) return;
     if (video.currentTime !== last && video.readyState >= 2) {
       last = video.currentTime;
-      frame(last * 1000);
+      frame(last * 1000, video);
     }
     if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(step);
     else requestAnimationFrame(step);
@@ -104,14 +185,15 @@ function everyFrame(video, frame) {
 
 /**
  * Track the working hand in `video` and call onFrame([t_ms, angle, ax, ay, az, loud, tone]).
- * `sound()` returns [dBFS, centroid Hz]. Returns a stop function.
+ * `sound(s)` returns [dBFS, centroid Hz] at s seconds. `step` (frames/s) steps through a recording
+ * instead of following playback. Returns a stop function.
  * Frames without a hand are skipped: the server resamples across short gaps.
  */
-export async function trackHands(video, sound, onFrame, { onHand } = {}) {
-  const hands = await model();
+export async function trackHands(video, sound, onFrame, { onHand, step } = {}) {
+  const hands = await model(!!step);
   const motion = wristMotion(), pickHand = follow(), sang = ema(0.1);
-  return everyFrame(video, (t) => {
-    const lm = pickHand(hands.detectForVideo(video, t).landmarks);
+  return (step ? (v, f) => stepThrough(v, step, f) : everyFrame)(video, (t, img) => {
+    const lm = pickHand((step ? hands.detect(img) : hands.detectForVideo(img, t)).landmarks);
     onHand?.(lm);
     if (!lm) return;
     const W = video.videoWidth, H = video.videoHeight, s = t / 1000;
@@ -119,7 +201,7 @@ export async function trackHands(video, sound, onFrame, { onHand } = {}) {
     let tilt = Math.abs(Math.atan2((lm[17].y - lm[5].y) * H, (lm[17].x - lm[5].x) * W) * 180 / Math.PI);
     if (tilt > 90) tilt = 180 - tilt;
     const [ax, ay] = motion(s, lm, W, H);
-    const [loud, tone] = sound();
+    const [loud, tone] = sound(s);
     onFrame([t, sang(s, tilt), ax, ay, 0, loud, tone]);
   });
 }
@@ -160,17 +242,17 @@ export function glowAt(img, at) {
  * Watch heated steel in `video` and call onFrame([t_ms, hue, glow, ax, ay, az]).
  * `spot()` says where the steel is ({x, y} in 0..1); the hand, when in view, gives movement.
  */
-export async function trackGlow(video, onFrame, { spot, onHand } = {}) {
-  const hands = await model();
+export async function trackGlow(video, onFrame, { spot, onHand, step } = {}) {
+  const hands = await model(!!step);
   const motion = wristMotion(), pickHand = follow();
   const canvas = document.createElement("canvas");
   canvas.width = GLOW_PX;
   canvas.height = Math.max(1, Math.round((GLOW_PX * video.videoHeight) / video.videoWidth));
   const g = canvas.getContext("2d", { willReadFrequently: true });
-  return everyFrame(video, (t) => {
-    g.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return (step ? (v, f) => stepThrough(v, step, f) : everyFrame)(video, (t, img) => {
+    g.drawImage(img, 0, 0, canvas.width, canvas.height);
     const [hue, glow] = glowAt(g.getImageData(0, 0, canvas.width, canvas.height), spot ? spot() : { x: 0.5, y: 0.5 });
-    const lm = pickHand(hands.detectForVideo(video, t).landmarks);
+    const lm = pickHand((step ? hands.detect(img) : hands.detectForVideo(img, t)).landmarks);
     onHand?.(lm);
     const [ax, ay] = lm ? motion(t / 1000, lm, video.videoWidth, video.videoHeight) : [0, 0];
     onFrame([t, hue, glow, ax, ay, 0]);

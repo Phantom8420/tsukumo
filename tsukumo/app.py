@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import config
 from .live import Hub
-from .services import NotFound, Tsukumo
+from .services import NotFound, Tsukumo, by_camera
 from .simulate import PROFILES
 from .store import Store
 
@@ -134,7 +134,11 @@ def create_app(db_path: Path | None = None, frames_dir: Path | None = None) -> F
 
     @app.get("/api/skills")
     def skills():
-        return store.skills()
+        out = store.skills()
+        for k in out:
+            ref = k["reference_session_id"] and store.session(k["reference_session_id"])
+            k["reference_filmed"] = bool(ref) and by_camera(ref["source"])
+        return out
 
     @app.post("/api/skills/{skill_id}/reference")
     def set_reference(skill_id: str, body: Reference, request: Request):

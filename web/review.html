@@ -56,6 +56,7 @@
       <div class="panel">
         <div class="muted">Match to master</div>
         <div class="big-score" id="score">–</div>
+        <p class="muted hidden" id="noise" style="margin:8px 0 0"></p>
         <div class="grid" id="channels" style="margin-top:16px;gap:10px"></div>
       </div>
       <div class="panel">
@@ -69,7 +70,7 @@
 <script type="module">
   import { api, info } from "./js/api.js";
   import { Lanes, series, clock } from "./js/chart.js";
-  import { header, esc, $, ago, cardHTML, wireCardLangs, toast, scoreClass } from "./js/ui.js";
+  import { header, esc, $, ago, cardHTML, wireCardLangs, toast, scoreClass, filmed } from "./js/ui.js";
 
   header();
   const id = new URLSearchParams(location.search).get("s");
@@ -259,6 +260,12 @@
       return;
     }
     $("#score").innerHTML = `<span class="${scoreClass(r.overall)}" style="color:var(--${scoreClass(r.overall) || "ink"})">${r.overall.toFixed(0)}</span><span class="muted" style="font-size:24px">%</span>`;
+    const margin = filmed(s.source) ? meta.certify.camera_margin : 0;
+    if (margin) {
+      $("#score").insertAdjacentHTML("beforeend", `<span class="muted" style="font-size:24px"> ±${margin}</span>`);
+      $("#noise").textContent = `Filmed, so the tracker alone can move this by about ${margin} points. A filmed pass needs ${meta.certify.score + margin}%.`;
+      $("#noise").classList.remove("hidden");
+    }
     $("#channels").innerHTML = K.channel_order.map((c) => `
       <div class="chan-row"><span>${esc(K.channels[c].label)}</span>
         <div class="meter"><i style="width:${r.channels[c]}%"></i></div>

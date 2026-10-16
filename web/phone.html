@@ -84,12 +84,12 @@
   <div class="overlay hidden" id="overlay"></div>
 
 <script type="module">
-  import { api, socket } from "./js/api.js";
+  import { api, info, socket } from "./js/api.js";
   import { esc, $, cardHTML } from "./js/ui.js";
-  import { trackHands, trackGlow, lockExposure, audioMeter } from "./js/vision.js";
+  import { trackHands, trackGlow, lockExposure, audioMeter, fileSound } from "./js/vision.js";
 
   const SPEECH = { ja: "ja-JP", en: "en-US", vi: "vi-VN", id: "id-ID" };
-  const HZ = 50, SEND_MS = 100;
+  const HZ = 50, SEND_MS = 100, FILE_FPS = 15;
   const show = (...ids) => ["pick", "intro", "calib", "run", "done", "enable", "calibrate", "go", "finish", "voice-row"]
     .forEach((id) => $(`#${id}`).classList.toggle("hidden", !ids.includes(id)));
 
@@ -122,7 +122,7 @@
     });
   }
 
-  function onMessage(m) {
+  async function onMessage(m) {
     if (m.type === "ready") {
       lang = m.lang;
       role = m.session.role;
@@ -145,7 +145,7 @@
       show("done");
       $("#done").innerHTML = role === "master"
         ? `<div class="step-title">Recorded ${m.strokes} strokes</div><p class="muted">${m.surprises} moments to review with the master on the big screen.</p>`
-        : m.report ? `<div class="muted">Match to master</div><div class="angle">${m.report.overall.toFixed(0)}<small>%</small></div>
+        : m.report ? `<div class="muted">Match to master</div><div class="angle">${m.report.overall.toFixed(0)}<small>%${captureSource === "phone" ? "" : " ±" + (await info()).certify.camera_margin}</small></div>
           ${m.report.weak_spots.slice(0, 2).map((w) => `<p class="muted">${esc(w.message)}</p>`).join("")}`
         : `<div class="step-title">Recorded</div>`;
     } else if (m.type === "error") {
@@ -172,10 +172,8 @@
       let meter, locked = false;
       if (src) {
         video.src = src;
-        video.muted = false;
-        const node = ctx.createMediaElementSource(video);
-        node.connect(ctx.destination);
-        meter = audioMeter(ctx, node);
+        // A clip without a sound track still gives hand frames.
+        meter = await fileSound(ctx, src).catch(() => () => [-90, 0]);
       } else {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment", width: { ideal: 1280 } },
@@ -217,13 +215,13 @@
           buffer.push(f);
           $("#angle").textContent = f[1].toFixed(0);
           $("#level").style.width = `${Math.max(0, Math.min(100, f[2]))}%`;
-        }, { spot: () => spot, onHand });
+        }, { spot: () => spot, onHand, step: src && FILE_FPS });
       } else {
         stopVision = await trackHands(video, meter, (f) => {
           buffer.push(f);
           $("#angle").textContent = f[1].toFixed(0);
           $("#level").style.width = `${Math.max(0, Math.min(100, (f[5] + 70) * 2))}%`;
-        }, { onHand });
+        }, { onHand, step: src && FILE_FPS });
       }
       wakeLock = await navigator.wakeLock?.request("screen").catch(() => null);
       show("run", "finish", "voice-row");
@@ -231,11 +229,11 @@
       $("#angle-box").classList.add("small");
       $("#hint").textContent = kind !== "heat" ? "hand tilt · sound"
         : `steel colour · glow · tap the picture where the steel is${src ? "" : locked ? " · exposure locked" : " · this camera can't lock exposure, so keep the light steady"}`;
-      $("#what").textContent = src ? "watching the video" : "watching through the camera";
+      $("#what").textContent = src ? "reading the video frame by frame" : "watching through the camera";
       timer = true;
       sender = setInterval(flush, SEND_MS);
       if (src) video.onended = () => $("#finish").click();
-      await video.play();
+      else await video.play();
     } catch (e) {
       $("#what").textContent = src ? `${e.message}.` : `${e.message}. Allow the camera and microphone over https.`;
       show("intro");

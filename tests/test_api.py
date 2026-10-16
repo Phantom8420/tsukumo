@@ -160,6 +160,11 @@ def test_device_reports_camera_source(client):
         assert client.get(f"/api/sessions/{ses['id']}").json()["session"]["source"] == "camera"
 
 
+def test_skills_say_how_their_master_was_recorded(client):
+    filmed = {k["id"]: k["reference_filmed"] for k in client.get("/api/skills").json()}
+    assert filmed["kaiten"] and not filmed["honbazuke"] and not filmed["hizukuri"]
+
+
 def test_apprentice_must_record_the_way_the_master_did(client):
     # The seeded honbazuke master wore the strapped phone; a filmed apprentice measures different things.
     ses = client.post("/api/sessions", json={"skill_id": "honbazuke", "person_id": "sato"}).json()

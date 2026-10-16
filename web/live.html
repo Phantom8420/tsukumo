@@ -111,7 +111,10 @@
     $("#setup-note").textContent = p.role === "master"
       ? `${p.name} works normally. Afterwards, TSUKUMO will flag the moments worth asking about.`
       : k.reference_session_id
-        ? `${p.name} trains against the master's ghost. Cues and cards appear in ${meta.langs[p.lang]}.`
+        ? `${p.name} trains against the master's ghost. Cues and cards appear in ${meta.langs[p.lang]}. `
+          + (k.reference_filmed ? "The master was filmed, so film this session too: camera or a recorded clip."
+            : k.kind === "heat" ? "This master's session is simulated, so press Simulate, or film a master on your own camera first."
+            : "The master wore the phone on the tool, so strap it on the same way (or press Simulate).")
         : `No master reference for this skill yet: record a master session first.`;
     $("#start").disabled = p.role === "apprentice" && !k.reference_session_id;
   };
