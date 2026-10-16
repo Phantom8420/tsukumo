@@ -60,6 +60,31 @@ counting those frames let a novice reach 80.
 
 One-link version: `live.html?person=nguyen&skill=yakiire&sim=novice&speed=4`.
 
+## Does it find the right moments?
+
+`python -m tsukumo eval` plants the master's habits at known times in 20 simulated sessions, then
+checks whether a question starts within 2.5 s of each one. It repeats this with the same habits
+done by less steady hands:
+
+| Hands | Sharpening: found | Quench: found | False alarms |
+|---|---|---|---|
+| Master | water, burr, micro-bevel 100 % · flip 0 % | turn, check, quench 100 % | 0 % |
+| Skilled-level unsteadiness | same | same | 0 % |
+| Novice-level unsteadiness (3° drift) | water, burr 100 % · **micro-bevel 30 %** · flip 0 % | 100 % | 12 % (sharpening) |
+
+What that means:
+
+- **Pauses and big changes are reliable.** Once the hand wanders as much as the habit changes
+  (3° drift against a 2.5° micro-bevel), the small change is lost in it. Capture masters, not
+  trainees, which is the point of the product anyway.
+- **The flip is never asked about.** Angle is stored without its sign so that an apprentice on
+  either face matches the master, and so a change of face looks like nothing happened. Its card
+  would have to be added by hand.
+- **The checks and the quench share one question.** They are 1.2 s apart, and the model keeps
+  questions at least 4 s apart.
+- These numbers come from the simulator, which plants clean habits. The real grinder clip gives
+  no ground truth to score against: its questions were checked by eye (see *Real footage*).
+
 ## Run it
 
 Requires Python 3.11+.
@@ -108,6 +133,7 @@ sessions are per instance and vanish on the next cold start.
 web/js/vision.js  camera/video -> frames: hand landmarks for tilt and wrist acceleration, audio meter
 tsukumo/
   config.py     kinds of work: each skill's frame layout and channels
+  evaluate.py   planted-habit recall/precision for surprise detection (`python -m tsukumo eval`)
   signals.py    raw frames -> channels (sharpening: angle, force, tempo, sound; heat: colour, glow, soak time)
   surprise.py   change/pause detection with explanations and build-up evidence
   align.py      banded DTW + per-channel scoring + weak spots

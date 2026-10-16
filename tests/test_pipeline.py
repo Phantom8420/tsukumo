@@ -143,3 +143,13 @@ def test_heat_simulator_ranks_profiles_and_catches_the_turn_and_check():
     for habit in ("turn", "check"):
         at = next(e["t"] for e in events if e["habit"] == habit)
         assert any(abs(t - at) < 2.5 for t in found), habit
+
+
+def test_detection_finds_planted_habits_without_false_alarms():
+    from tsukumo.evaluate import evaluate
+    sharpen, heat = evaluate("sharpen", range(5)), evaluate("heat", range(5))
+    for r in (sharpen, heat):
+        assert r["precision"] == 1.0
+    assert all(sharpen["recall"][h] == 1.0 for h in ("water", "burr", "micro"))
+    assert sharpen["recall"]["flip"] == 0.0     # angle is unsigned on purpose: a side change looks like nothing
+    assert all(heat["recall"][h] == 1.0 for h in ("turn", "check", "quench"))

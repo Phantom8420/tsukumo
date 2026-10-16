@@ -1,4 +1,4 @@
-"""python -m tsukumo [serve|seed|cert|reset]"""
+"""python -m tsukumo [serve|seed|cert|reset|eval]"""
 
 from __future__ import annotations
 
@@ -43,8 +43,15 @@ def main() -> None:
     serve.add_argument("--http", action="store_true", help="plain HTTP (phones will refuse sensors/mic)")
     sub.add_parser("seed", help="load the demo workshop if the database is empty")
     sub.add_parser("reset", help="delete all data and reseed the demo workshop")
+    ev = sub.add_parser("eval", help="measure how often surprise detection finds planted habits")
+    ev.add_argument("--seeds", type=int, default=20)
     args = parser.parse_args()
     cmd = args.cmd or "serve"
+
+    if cmd == "eval":
+        from .evaluate import report
+        print(report(range(args.seeds)))
+        return
 
     if cmd in ("seed", "reset"):
         from .seed import seed
