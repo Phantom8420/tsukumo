@@ -4,7 +4,7 @@ The workshop is fictional. Its sharpening sessions are simulated, then
 pushed through the real pipeline (surprise detection, scoring), so what the
 demo shows is what the system actually computes. One master is not simulated:
 the wheel-grinding session is real Wikimedia Commons footage that the camera
-tracker (web/js/vision.js) turned into frames, stored in footage/grinder.npy.
+tracker (web/js/vision.js) stepped through frame by frame, stored in footage/grinder.npy.
 """
 
 from __future__ import annotations

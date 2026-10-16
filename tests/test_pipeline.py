@@ -127,10 +127,14 @@ def test_real_footage_gives_strokes_and_habits():
     from tsukumo.seed import FOOTAGE
 
     feat = extract(np.load(FOOTAGE), "sharpen")
-    assert 10 <= len(feat.stroke_times) <= 40
+    assert 20 <= len(feat.stroke_times) <= 80
     assert all(np.isfinite(feat.X[c]).all() for c in feat.channels)
-    # The wheel goes quiet whenever the blade lifts off it; those are real events worth asking about.
-    assert surprise.detect(feat)[0]
+    # Labelled by eye from the clip: the blade lifts off the wheel at these times, and the
+    # camera is moved from 33 to 36 s. Every lift should be asked about; the camera move should not.
+    found = surprise.detect(feat)[0]
+    for lift in (14.6, 24.5, 42.9):
+        assert any(s.t_start - 1 <= lift <= s.t_end + 1 for s in found), lift
+    assert not any(33 <= s.t_start <= 36 for s in found)
 
 
 def test_heat_simulator_ranks_profiles_and_catches_the_turn_and_check():

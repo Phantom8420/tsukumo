@@ -60,8 +60,9 @@ export function initials(name) {
   return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
-// Mirrors services.by_camera: filmed scores carry the tracker's noise.
-export const filmed = (source) => source === "camera" || source.startsWith("video");
+// Mirrors services.noise: how far the tracker alone can move a score recorded this way.
+export const margin = (source, certify) =>
+  source.startsWith("video") ? certify.file_margin : source === "camera" ? certify.camera_margin : 0;
 
 export function scoreClass(score) {
   return score == null ? "" : score >= 75 ? "ok" : score >= 55 ? "warn" : "bad";

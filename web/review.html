@@ -70,7 +70,7 @@
 <script type="module">
   import { api, info } from "./js/api.js";
   import { Lanes, series, clock } from "./js/chart.js";
-  import { header, esc, $, ago, cardHTML, wireCardLangs, toast, scoreClass, filmed } from "./js/ui.js";
+  import { header, esc, $, ago, cardHTML, wireCardLangs, toast, scoreClass, margin } from "./js/ui.js";
 
   header();
   const id = new URLSearchParams(location.search).get("s");
@@ -260,10 +260,10 @@
       return;
     }
     $("#score").innerHTML = `<span class="${scoreClass(r.overall)}" style="color:var(--${scoreClass(r.overall) || "ink"})">${r.overall.toFixed(0)}</span><span class="muted" style="font-size:24px">%</span>`;
-    const margin = filmed(s.source) ? meta.certify.camera_margin : 0;
-    if (margin) {
-      $("#score").insertAdjacentHTML("beforeend", `<span class="muted" style="font-size:24px"> ±${margin}</span>`);
-      $("#noise").textContent = `Filmed, so the tracker alone can move this by about ${margin} points. A filmed pass needs ${meta.certify.score + margin}%.`;
+    const m = margin(s.source, meta.certify);
+    if (m) {
+      $("#score").insertAdjacentHTML("beforeend", `<span class="muted" style="font-size:24px"> ±${m}</span>`);
+      $("#noise").textContent = `Filmed, so the tracker alone can move this by about ${m} points. A pass needs ${meta.certify.score + m}%.`;
       $("#noise").classList.remove("hidden");
     }
     $("#channels").innerHTML = K.channel_order.map((c) => `

@@ -85,7 +85,7 @@
 
 <script type="module">
   import { api, info, socket } from "./js/api.js";
-  import { esc, $, cardHTML } from "./js/ui.js";
+  import { esc, $, cardHTML, margin } from "./js/ui.js";
   import { trackHands, trackGlow, lockExposure, audioMeter, fileSound } from "./js/vision.js";
 
   const SPEECH = { ja: "ja-JP", en: "en-US", vi: "vi-VN", id: "id-ID" };
@@ -145,7 +145,7 @@
       show("done");
       $("#done").innerHTML = role === "master"
         ? `<div class="step-title">Recorded ${m.strokes} strokes</div><p class="muted">${m.surprises} moments to review with the master on the big screen.</p>`
-        : m.report ? `<div class="muted">Match to master</div><div class="angle">${m.report.overall.toFixed(0)}<small>%${captureSource === "phone" ? "" : " ±" + (await info()).certify.camera_margin}</small></div>
+        : m.report ? `<div class="muted">Match to master</div><div class="angle">${m.report.overall.toFixed(0)}<small>%${captureSource === "phone" ? "" : " ±" + margin(captureSource, (await info()).certify)}</small></div>
           ${m.report.weak_spots.slice(0, 2).map((w) => `<p class="muted">${esc(w.message)}</p>`).join("")}`
         : `<div class="step-title">Recorded</div>`;
     } else if (m.type === "error") {

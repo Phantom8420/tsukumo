@@ -147,7 +147,9 @@ def test_camera_frames_mark_the_session_and_need_a_wider_pass():
     from tsukumo.services import passes
     assert passes({"score": 80.0, "source": "phone"})
     assert not passes({"score": 80.0, "source": "camera"})
-    assert not passes({"score": 87.0, "source": "video:media/grinder.webm"})
+    assert not passes({"score": 87.0, "source": "camera"})
+    assert passes({"score": 79.0, "source": "video:media/grinder.webm"})
+    assert not passes({"score": 78.0, "source": "video:media/grinder.webm"})
     assert passes({"score": 88.0, "source": "camera"})
 
 

@@ -28,24 +28,41 @@ Not every session in the demo is simulated. **Wheel grinding** is a master sessi
 [*Knife sharpening video*](https://commons.wikimedia.org/wiki/File:Knife_sharpening_video.webm) by
 Vijayanrajapuram (CC BY-SA 4.0; rotated upright and re-encoded as `web/media/grinder.webm`, which is
 shared under the same licence). The clip went through the camera tracker end to end: 46 s became
-18 strokes and 6 questions for the master. The strongest of them line up with what you can see in
-the clip, such as the wheel's sound dropping 16 dB when the blade lifts off it. The review page plays
-the clip and jumps to each question's moment.
+51 strokes and 5 questions for the master. The review page plays the clip and jumps to each
+question's moment.
+
+**Checked against labels, not the simulator.** Watching the clip, the blade lifts off the wheel
+three times (about 14.6, 24.5 and 42.9 s) and the camera is moved between 33 and 36 s. The labels
+are in `tests/test_pipeline.py`, which fails if they stop matching.
+
+| | Lifts asked about | False alarms on the camera move |
+|---|---|---|
+| Clip played in real time (first version) | 2 of 3 | 1 |
+| Clip stepped frame by frame (now) | **3 of 3** | **0** |
+
+The other two questions (6 s, 18 s) can't be confirmed or ruled out by eye. Three labelled events
+is a small sample.
 
 What it showed about camera capture, measured rather than assumed:
 
-- **Rate.** CPU hand tracking in a headless browser kept up at about 6.6 frames/s. That is plenty
-  for strokes (well under 1 Hz on a wheel) but coarse for acceleration. A phone with GPU inference
-  does better.
-- **Test-retest.** The same clip played again as an "apprentice" scored **87 %** against itself,
-  not 100 %, because tracking lands on different frames each run. Treat score differences under
-  about 13 points from camera sessions as noise; use the strapped phone when it needs to be finer.
+- **Recorded clips are stepped, not played.** The tracker seeks to every 1/15 s and reads each
+  frame afresh (MediaPipe image mode, GPU with CPU fallback); the sound is read from the file, not
+  the speakers. Played in real time, the tracker dropped frames and its frame-to-frame state drifted:
+  the same clip gave 18 strokes and scored 72 to 87 % against itself. Stepped, two master
+  recordings gave 51 and 52 strokes and the same questions to within a second, and the clip scored
+  **96.5, 96.8 and 98.3 %** against itself. Scores from clips carry a ±4 margin.
+- **Live camera is still real time**, so it keeps the old margin: the same clip played live scored
+  87 % against itself. Live camera scores show ±13, and a filmed pass needs the mark plus that
+  margin. Use the strapped phone when it needs to be finer.
+- **Stroke counts depend on frame rate.** At 15 frames/s the tracker sees 51 strokes where real-time
+  playback (about 6.6 frames/s on a headless CPU) saw 18. The wrist turns are too small to count by
+  eye in the clip, so neither number is verified.
 - **Angle is the hand's tilt**, from the knuckle line against the horizon, not the blade's angle to
   the stone. It moves with the blade but is a proxy, so only compare camera sessions with camera
   sessions.
 
 To process another clip: create a session, then open `phone.html?s=<id>&video=<url>`. It plays the
-clip, streams frames and finishes on its own.
+clip frame by frame, streams frames and finishes on its own.
 
 ## Second craft: quench hardening
 
@@ -100,8 +117,8 @@ What that means:
   would have to be added by hand.
 - **The checks and the quench share one question.** They are 1.2 s apart, and the model keeps
   questions at least 4 s apart.
-- These numbers come from the simulator, which plants clean habits. The real grinder clip gives
-  no ground truth to score against: its questions were checked by eye (see *Real footage*).
+- These numbers come from the simulator, which plants clean habits. The real grinder clip is
+  checked against hand-labelled lifts instead (see *Real footage*).
 
 ## Run it
 

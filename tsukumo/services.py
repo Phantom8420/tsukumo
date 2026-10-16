@@ -9,7 +9,7 @@ import numpy as np
 
 from . import align, kotsu, surprise
 from .coach import LiveCoach
-from .config import CAMERA_NOISE, CERTIFY_SCORE, CERTIFY_SESSIONS, FS, ROYALTY_YEN_PER_VIEW
+from .config import CAMERA_NOISE, CERTIFY_SCORE, FILE_NOISE, CERTIFY_SESSIONS, FS, ROYALTY_YEN_PER_VIEW
 from .signals import Features, extract
 from .store import Store
 
@@ -21,9 +21,14 @@ def by_camera(source: str) -> bool:
     return source == "camera" or source.startswith("video")
 
 
+def noise(source: str) -> float:
+    """How far the tracker alone can move a score recorded this way."""
+    return 0.0 if not by_camera(source) else FILE_NOISE if source.startswith("video") else CAMERA_NOISE
+
+
 def passes(session: dict) -> bool:
-    """A camera score is only a pass if it clears the mark by more than the tracker's own noise."""
-    return session["score"] - (CAMERA_NOISE if by_camera(session["source"]) else 0) >= CERTIFY_SCORE
+    """A filmed score is only a pass if it clears the mark by more than the tracker's own noise."""
+    return session["score"] - noise(session["source"]) >= CERTIFY_SCORE
 
 
 class NotFound(LookupError):
@@ -194,7 +199,8 @@ class Tsukumo:
                 "to_certify": max(0, CERTIFY_SESSIONS - passed),
             })
         return {"person": person, "skills": skills, "cards_learned": self.store.views_by(person_id),
-                "certify_rule": {"score": CERTIFY_SCORE, "sessions": CERTIFY_SESSIONS, "camera_margin": CAMERA_NOISE}}
+                "certify_rule": {"score": CERTIFY_SCORE, "sessions": CERTIFY_SESSIONS, "camera_margin": CAMERA_NOISE,
+                                 "file_margin": FILE_NOISE}}
 
     def _certified(self) -> dict[str, set[str]]:
         """skill_id -> apprentice ids who have measurably taken the skill over."""
